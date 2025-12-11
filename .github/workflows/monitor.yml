@@ -35,11 +35,11 @@ jobs:
         run: python monitor.py
 
       - name: Commit changes (API hash/history)
-        run: |
-          git config --local user.email "github-actions[bot]@users.noreply.github.com"
-          git config --local user.name "github-actions[bot]"
-          git add data/last_hash.json data/current.json data/previous.json data/history.json || true
-          git diff --quiet && git diff --staged --quiet || git commit -m "Update schedule [skip ci]"
+  run: |
+    git config --local user.email "github-actions[bot]@users.noreply.github.com"
+    git config --local user.name "github-actions[bot]"
+    git add data/last_hash.json data/current.json data/previous.json || true
+    git diff --quiet && git diff --staged --quiet || git commit -m "Update schedule [skip ci]"
 
-      - name: Push changes
-        run: git push || true
+- name: Push changes
+  run: git push || true
