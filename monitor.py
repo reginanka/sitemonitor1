@@ -34,11 +34,9 @@ def fetch_schedule(cherga_id: int, pidcherga_id: int) -> List[Dict]:
 
         text = resp.text.strip()
 
-        # якщо це вже масив, просто парсимо
         if text.startswith("[") and text.endswith("]"):
             data = json.loads(text)
         else:
-            # формат {...},{...},{...} → робимо [{...},{...},{...}]
             if text.startswith("{"):
                 text = f"[{text}]"
             data = json.loads(text)
@@ -146,6 +144,14 @@ def main():
         last_hash_data = load_last_hash()
         current_hash = calculate_hash(current_schedules)
 
+        # Якщо last_hash.json порожній або немає schedules_hash → це перший запуск
+        if not last_hash_data or "schedules_hash" not in last_hash_data:
+            log_to_buffer("ℹ️ Перший запуск або last_hash.json зпорожнено — зберігаю поточний стан")
+            save_json(current_schedules, CURRENT_FILE)
+            save_json(current_schedules, PREVIOUS_FILE)
+            save_last_hash(current_schedules, timestamp)
+            return
+
         if current_hash == last_hash_data.get("schedules_hash"):
             log_to_buffer("✅ Дані по всіх чергах не змінилися (хеш збігається)")
             return
@@ -172,15 +178,15 @@ def main():
             log_to_buffer("❌ Не вдалося створити скріншот")
 
         # 6. Формування повідомлення для каналу
-queues_str = format_queues(changed_queues)
-final_message = (
-    f"Для {queues_str} 🔔 ОНОВЛЕННЯ ГРАФІКА ВІДКЛЮЧЕНЬ\n\n"
-    f"{message_content}\n\n"
-    f"🔗 Переглянути графік на сайті\n{URL}\n\n"
-)
-if date_content:
-    final_message += f"{date_content}\n\n"
-final_message += f"⚡ ПІДПИСАТИСЯ ⚡\n{SUBSCRIBE}"
+        queues_str = format_queues(changed_queues)
+        final_message = (
+            f"Для {queues_str} 🔔 ОНОВЛЕННЯ ГРАФІКА ВІДКЛЮЧЕНЬ\n\n"
+            f"{message_content}\n\n"
+            f"🔗 Переглянути графік на сайті\n{URL}\n\n"
+        )
+        if date_content:
+            final_message += f"{date_content}\n\n"
+        final_message += f"⚡ ПІДПИСАТИСЯ ⚡\n{SUBSCRIBE}"
 
         # 7. Відправити в Telegram
         from pathlib import Path as _Path
