@@ -12,6 +12,8 @@ from site_content import get_schedule_content, take_screenshot_between_elements
 from telegram_handler import send_notification
 
 API_BASE_URL = os.getenv("API_BASE_URL")
+URL = os.environ.get('URL')
+SUBSCRIBE = os.environ.get('SUBSCRIBE')
 
 QUEUES = [(i, j) for i in range(1, 7) for j in range(1, 2 + 1)]
 
@@ -174,11 +176,11 @@ def main():
         final_message = (
             f"Для {queues_str} 🔔 ОНОВЛЕННЯ ГРАФІКА ВІДКЛЮЧЕНЬ\n\n"
             f"{message_content}\n\n"
-            f"🔗 Переглянути графік на сайті\n\n"
+            f'\n\n<a href="{URL}">🔗 Переглянути графік на сайті </a>\n\n'
         )
         if date_content:
             final_message += f"{date_content}\n\n"
-        final_message += "⚡️ ПІДПИСАТИСЯ ⚡️"
+        final_message += f'<a href="{SUBSCRIBE}">⚡ ПІДПИСАТИСЯ ⚡</a>'
 
         # 7. Відправити в Telegram
         from pathlib import Path as _Path
