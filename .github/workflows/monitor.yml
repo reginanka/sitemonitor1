@@ -3,6 +3,7 @@ name: Schedule Monitor
 on:
   schedule:
     - cron: '*/5 * * * *'
+  
   workflow_dispatch:
 
 jobs:
@@ -45,3 +46,31 @@ jobs:
           git add -A || true
           git commit -m "📊 Auto-update $(date -u +'%Y-%m-%d %H:%M:%S')" || true
           git push
+      
+      - name: Send Telegram notification on success
+        if: success()
+        uses: appleboy/telegram-action@master
+        with:
+          to: ${{ secrets.TELEGRAM_CHANNEL_ID }}
+          token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          message: |
+            ✅ Monitor запустився успішно!
+            
+            Час: $(date -u +'%Y-%m-%d %H:%M:%S')
+            Репозиторій: ${{ github.repository }}
+            Запуск: ${{ github.run_id }}
+      
+      - name: Send Telegram notification on failure
+        if: failure()
+        uses: appleboy/telegram-action@master
+        with:
+          to: ${{ secrets.TELEGRAM_CHANNEL_ID }}
+          token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          message: |
+            ❌ Monitor завершився з помилкою!
+            
+            Час: $(date -u +'%Y-%m-%d %H:%M:%S')
+            Репозиторій: ${{ github.repository }}
+            Запуск: ${{ github.run_id }}
+            
+            Переглянь логи: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
