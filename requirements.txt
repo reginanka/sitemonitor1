@@ -1,0 +1,5 @@
+requests==2.31.0
+beautifulsoup4==4.12.2
+playwright==1.48.0
+pytz==2024.1
+Pillow>=10.0.0
