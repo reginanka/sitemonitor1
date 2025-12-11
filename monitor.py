@@ -21,7 +21,6 @@ DATA_DIR = Path("data")
 DATA_DIR.mkdir(exist_ok=True)
 
 CURRENT_FILE = DATA_DIR / "current.json"
-PREVIOUS_FILE = DATA_DIR / "previous.json"
 HASH_FILE = DATA_DIR / "last_hash.json"
 
 
@@ -90,31 +89,41 @@ def calculate_hash(obj) -> str:
     return hashlib.md5(json_str.encode("utf-8")).hexdigest()
 
 
-def load_last_hash() -> Dict:
-    return load_json(HASH_FILE)
+def extract_hashes(schedules: Dict[str, List[Dict]]) -> Dict[str, str]:
+    """Витягує хеши для кожної черги"""
+    hashes = {}
+    for queue_key, schedule in schedules.items():
+        hashes[queue_key] = calculate_hash(schedule)
+    return hashes
 
 
-def save_last_hash(schedules: Dict, timestamp: str) -> None:
+def load_last_hashes() -> Dict[str, str]:
+    hash_data = load_json(HASH_FILE)
+    return hash_data.get("queues", {})
+
+
+def save_hashes(hashes: Dict[str, str], timestamp: str) -> None:
     hash_data = {
         "timestamp": timestamp,
-        "schedules_hash": calculate_hash(schedules),
-        "queues": {
-            key: calculate_hash(schedule)
-            for key, schedule in schedules.items()
-        },
+        "queues": hashes,
     }
     save_json(hash_data, HASH_FILE)
 
 
 def get_changed_queues(
-    current_schedules: Dict[str, List[Dict]], last_hash_data: Dict
+    current_hashes: Dict[str, str], last_hashes: Dict[str, str]
 ) -> List[str]:
-    last_queues_hashes: Dict[str, str] = last_hash_data.get("queues", {})
-    changed: List[str] = []
-    for queue_key, schedule in current_schedules.items():
-        queue_hash = calculate_hash(schedule)
-        if queue_hash != last_queues_hashes.get(queue_key):
+    """Порівнює поточні хеши з попередніми"""
+    changed = []
+    for queue_key, current_hash in current_hashes.items():
+        last_hash = last_hashes.get(queue_key)
+        if last_hash is None:
+            # Перший запуск для цієї черги
+            log_to_buffer(f"ℹ️ Перший запуск для {queue_key}")
+        elif current_hash != last_hash:
+            # Є зміни!
             changed.append(queue_key)
+            log_to_buffer(f"🔄 Зміна в {queue_key}: {last_hash[:8]}... → {current_hash[:8]}...")
     return changed
 
 
@@ -134,50 +143,47 @@ def main():
     log_to_buffer("=" * 60)
 
     try:
-        # 1. Завантаження графіків по API
+        # 1. Завантажити графіки з API
         current_schedules = fetch_all_schedules()
         if not current_schedules:
             log_to_buffer("❌ Не вдалось завантажити жоден графік")
             return
 
-        # 2. Перевірка загального хешу
-        last_hash_data = load_last_hash()
-        current_hash = calculate_hash(current_schedules)
+        # 2. Зберегти поточні графіки в data/current.json
+        save_json(current_schedules, CURRENT_FILE)
+        log_to_buffer("💾 Графіки збережено в data/current.json")
 
-        # Якщо last_hash.json порожній або немає schedules_hash → це перший запуск
-        if not last_hash_data or "schedules_hash" not in last_hash_data:
-            log_to_buffer("ℹ️ Перший запуск або last_hash.json зпорожнено — зберігаю поточний стан")
-            save_json(current_schedules, CURRENT_FILE)
-            save_json(current_schedules, PREVIOUS_FILE)
-            save_last_hash(current_schedules, timestamp)
-            return
+        # 3. Витягти хеші поточних графіків
+        current_hashes = extract_hashes(current_schedules)
+        log_to_buffer(f"🔐 Витягнено хеші для {len(current_hashes)} черг")
 
-        if current_hash == last_hash_data.get("schedules_hash"):
-            log_to_buffer("✅ Дані по всіх чергах не змінилися (хеш збігається)")
-            return
+        # 4. Завантажити попередні хеші
+        last_hashes = load_last_hashes()
+        log_to_buffer(f"📋 Завантажено попередні хеші для {len(last_hashes)} черг")
 
-        log_to_buffer("⚠️ Є зміни в даних (загальний хеш інший)")
+        # 5. Порівняти хеші і знайти змінені черги
+        changed_queues = get_changed_queues(current_hashes, last_hashes)
 
-        # 3. Визначити, які саме черги змінилися
-        changed_queues = get_changed_queues(current_schedules, last_hash_data)
         if not changed_queues:
-            log_to_buffer("⚠️ Загальний хеш змінився, але список змінених черг порожній")
+            log_to_buffer("✅ Дані по всіх чергах не змінилися")
+            # Все одно оновити timestamp
+            save_hashes(current_hashes, timestamp)
             return
 
         log_to_buffer(f"🔔 Зміни виявлено для: {', '.join(changed_queues)}")
 
-        # 4. Отримати текст і дату з сайту
+        # 6. Отримати текст і дату з сайту
         message_content, date_content = get_schedule_content()
         if not message_content:
             log_to_buffer("❌ Не вдалося отримати важливе повідомлення з сайту")
             return
 
-        # 5. Скріншот із сайту
+        # 7. Скріншот із сайту
         screenshot_path, screenshot_hash = take_screenshot_between_elements()
         if not screenshot_path:
             log_to_buffer("❌ Не вдалося створити скріншот")
 
-        # 6. Формування повідомлення для каналу
+        # 8. Формування повідомлення для каналу
         queues_str = format_queues(changed_queues)
         final_message = (
             f"Для {queues_str} 🔔 ОНОВЛЕННЯ ГРАФІКА ВІДКЛЮЧЕНЬ\n\n"
@@ -188,7 +194,7 @@ def main():
             final_message += f"{date_content}\n\n"
         final_message += f"⚡ ПІДПИСАТИСЯ ⚡\n{SUBSCRIBE}"
 
-        # 7. Відправити в Telegram
+        # 9. Відправити в Telegram
         from pathlib import Path as _Path
 
         img_path = _Path(screenshot_path) if screenshot_path else None
@@ -198,11 +204,9 @@ def main():
         else:
             log_to_buffer("❌ Помилка надсилання повідомлення в канал")
 
-        # 8. Оновити last_hash по API
-        save_json(current_schedules, CURRENT_FILE)
-        save_json(current_schedules, PREVIOUS_FILE)
-        save_last_hash(current_schedules, timestamp)
-        log_to_buffer("💾 Дані по API-хешах збережено")
+        # 10. Оновити хеші в data/last_hash.json
+        save_hashes(current_hashes, timestamp)
+        log_to_buffer("💾 Хеші оновлено в data/last_hash.json")
 
     except Exception as e:
         log_to_buffer(f"❌ Критична помилка: {e}")
