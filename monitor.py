@@ -24,13 +24,41 @@ HASH_FILE = DATA_DIR / "last_hash.json"
 
 
 def fetch_schedule(cherga_id: int, pidcherga_id: int) -> List[Dict]:
+    """
+    Тягне графік для однієї черги.
+    API повертає рядок на кшталт:
+    {"cherga":"1",...},{"cherga":"1",...},...
+    Тому парсимо через resp.text і обгортаємо в [].
+    """
+    resp: Optional[requests.Response] = None
     try:
         params = {"cherga_id": cherga_id, "pidcherga_id": pidcherga_id}
         resp = requests.get(API_BASE_URL, params=params, timeout=10)
         resp.raise_for_status()
-        return resp.json()
+
+        text = resp.text.strip()
+
+        # якщо це вже масив, просто парсимо
+        if text.startswith("[") and text.endswith("]"):
+            data = json.loads(text)
+        else:
+            # формат {...},{...},{...} → робимо [{...},{...},{...}]
+            if text.startswith("{"):
+                text = f"[{text}]"
+            data = json.loads(text)
+
+        if isinstance(data, list):
+            return data
+
+        log_to_buffer(f"⚠️ Відповідь не список для {cherga_id}.{pidcherga_id}")
+        return []
+
     except Exception as e:
-        log_to_buffer(f"❌ Помилка {cherga_id}.{pidcherga_id}: {e}")
+        body = resp.text[:200] if resp is not None else ""
+        log_to_buffer(
+            f"❌ Помилка {cherga_id}.{pidcherga_id}: {e}. "
+            f"Фрагмент відповіді: {body}"
+        )
         return []
 
 
@@ -146,7 +174,6 @@ def main():
         screenshot_path, screenshot_hash = take_screenshot_between_elements()
         if not screenshot_path:
             log_to_buffer("❌ Не вдалося створити скріншот")
-            # все одно можна відправити тільки текст, якщо хочеш, – опційно
 
         # 6. Формування повідомлення для каналу
         queues_str = format_queues(changed_queues)
