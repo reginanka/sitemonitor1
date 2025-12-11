@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 import os
 import json
 import hashlib
@@ -8,54 +7,45 @@ from pathlib import Path
 import logging
 from typing import Dict, List, Tuple, Optional
 
-# Налаштування логування
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
 
-# Константи з environment
 API_BASE_URL = os.getenv('API_BASE_URL')
 TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
 TELEGRAM_CHANNEL_ID = os.getenv('TELEGRAM_CHANNEL_ID')
 
-# Черги: cherga_id 1-6, pidcherga_id 1-2 (всього 12)
 QUEUES = [(i, j) for i in range(1, 7) for j in range(1, 3)]
 
-# Директорії
 DATA_DIR = Path('data')
 IMAGES_DIR = Path('images')
 DATA_DIR.mkdir(exist_ok=True)
 IMAGES_DIR.mkdir(exist_ok=True)
 
-# Файли
 CURRENT_FILE = DATA_DIR / 'current.json'
 PREVIOUS_FILE = DATA_DIR / 'previous.json'
 HISTORY_FILE = DATA_DIR / 'history.json'
 HASH_FILE = DATA_DIR / 'last_hash.json'
 
 
-# ============================================================================
-# ФУНКЦІЇ ДЛЯ РОБОТИ З API
-# ============================================================================
-
 def fetch_schedule(cherga_id: int, pidcherga_id: int) -> List[Dict]:
-    """Завантажити графік для однієї черги з API"""
+    """Завантажити графік для однієї черги"""
     try:
         params = {'cherga_id': cherga_id, 'pidcherga_id': pidcherga_id}
         response = requests.get(API_BASE_URL, params=params, timeout=10)
         response.raise_for_status()
         return response.json()
     except Exception as e:
-        logger.error(f"Помилка запиту {cherga_id}.{pidcherga_id}: {e}")
+        logger.error(f"Помилка {cherga_id}.{pidcherga_id}: {e}")
         return []
 
 
 def fetch_all_schedules() -> Dict[str, List[Dict]]:
-    """Завантажити графіки для всіх 12 черг"""
+    """Завантажити графіки всіх черг"""
     all_schedules = {}
-    logger.info("📡 Завантажую графіки для всіх черг...")
+    logger.info("📡 Завантажую графіки...")
     
     for cherga_id, pidcherga_id in QUEUES:
         queue_key = f"{cherga_id}.{pidcherga_id}"
@@ -66,15 +56,8 @@ def fetch_all_schedules() -> Dict[str, List[Dict]]:
     return all_schedules
 
 
-# ============================================================================
-# ФУНКЦІЇ ДЛЯ ОБРОБКИ ЧАСУ
-# ============================================================================
-
 def parse_time_intervals(schedule: List[Dict]) -> Dict[str, List[Tuple[str, str]]]:
-    """
-    Парсити 30-хвилинні інтервали в діапазони часу
-    Повертає: {'11.12.2025': [('00:00', '03:00'), ('06:00', '09:00'), ...]}
-    """
+    """Парсити інтервали"""
     intervals_by_date = {}
     
     for entry in schedule:
@@ -91,7 +74,6 @@ def parse_time_intervals(schedule: List[Dict]) -> Dict[str, List[Tuple[str, str]
         start_time, end_time = span.split('-')
         intervals_by_date[date][color].append((start_time, end_time))
     
-    # Об'єднати суміжні інтервали
     merged_intervals = {}
     for date, colors in intervals_by_date.items():
         merged_intervals[date] = merge_intervals(colors['red'])
@@ -100,7 +82,7 @@ def parse_time_intervals(schedule: List[Dict]) -> Dict[str, List[Tuple[str, str]
 
 
 def merge_intervals(intervals: List[Tuple[str, str]]) -> List[Tuple[str, str]]:
-    """Об'єднати суміжні часові інтервали"""
+    """Об'єднати суміжні інтервали"""
     if not intervals:
         return []
     
@@ -133,7 +115,7 @@ def calculate_duration(start: str, end: str) -> float:
 
 
 def get_day_name(date_str: str) -> str:
-    """Отримати назву дня тижня для дати формату DD.MM.YYYY"""
+    """Отримати день тижня"""
     try:
         day, month, year = map(int, date_str.split('.'))
         date = datetime(year, month, day)
@@ -143,13 +125,8 @@ def get_day_name(date_str: str) -> str:
         return "невідомо"
 
 
-# ============================================================================
-# ФУНКЦІЇ ДЛЯ ПОРІВНЯННЯ ГРАФІКІВ
-# ============================================================================
-
-def compare_schedules(current: Dict[str, List[Dict]], 
-                     previous: Dict[str, List[Dict]]) -> Dict:
-    """Порівняти поточні та попередні графіки"""
+def compare_schedules(current: Dict[str, List[Dict]], previous: Dict[str, List[Dict]]) -> Dict:
+    """Порівняти графіки"""
     changes = {}
     
     for queue_key, current_schedule in current.items():
@@ -158,7 +135,6 @@ def compare_schedules(current: Dict[str, List[Dict]],
         previous_intervals = parse_time_intervals(previous_schedule)
         
         queue_changes = {}
-        
         all_dates = set(current_intervals.keys()) | set(previous_intervals.keys())
         
         for date in all_dates:
@@ -180,10 +156,6 @@ def compare_schedules(current: Dict[str, List[Dict]],
     return changes
 
 
-# ============================================================================
-# ФУНКЦІЇ ДЛЯ ФОРМАТУВАННЯ
-# ============================================================================
-
 def format_message(changes: Dict, timestamp: str) -> Optional[str]:
     """Форматувати повідомлення"""
     if not changes:
@@ -201,12 +173,10 @@ def format_message(changes: Dict, timestamp: str) -> Optional[str]:
             day_name = get_day_name(date)
             message += f"  {day_name}, {date}:\n"
             
-            # Видалені інтервали
             for start, end in sorted(day_changes['removed']):
                 duration = calculate_duration(start, end)
                 message += f"  ❌ {start} - {end} – на {duration:.0f} год\n"
             
-            # Додані інтервали
             for start, end in sorted(day_changes['added']):
                 duration = calculate_duration(start, end)
                 message += f"  🔴 {start} - {end} – на {duration:.0f} год\n"
@@ -218,19 +188,15 @@ def format_message(changes: Dict, timestamp: str) -> Optional[str]:
     return message
 
 
-# ============================================================================
-# ФУНКЦІЇ ДЛЯ РОБОТИ З ФАЙЛАМИ
-# ============================================================================
-
 def save_json(data: Dict, filepath: Path):
-    """Зберегти дані в JSON"""
+    """Зберегти JSON"""
     filepath.parent.mkdir(parents=True, exist_ok=True)
     with open(filepath, 'w', encoding='utf-8') as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
 
 def load_json(filepath: Path) -> Dict:
-    """Завантажити дані з JSON"""
+    """Завантажити JSON"""
     if not filepath.exists():
         return {}
     try:
@@ -241,7 +207,7 @@ def load_json(filepath: Path) -> Dict:
 
 
 def calculate_hash(data: Dict) -> str:
-    """Розрахувати MD5 хеш даних"""
+    """Розрахувати хеш"""
     json_str = json.dumps(data, sort_keys=True, ensure_ascii=False)
     return hashlib.md5(json_str.encode()).hexdigest()
 
@@ -252,7 +218,7 @@ def load_last_hash() -> Dict:
 
 
 def save_last_hash(schedules: Dict, timestamp: str):
-    """Зберегти хеш поточного стану"""
+    """Зберегти хеш"""
     hash_data = {
         'timestamp': timestamp,
         'schedules_hash': calculate_hash(schedules),
@@ -266,7 +232,7 @@ def save_last_hash(schedules: Dict, timestamp: str):
 
 
 def save_to_history(changes: Dict, timestamp: str):
-    """Зберегти зміни в історію"""
+    """Зберегти в історію"""
     history = load_json(HISTORY_FILE)
     if not isinstance(history, list):
         history = []
@@ -282,92 +248,80 @@ def save_to_history(changes: Dict, timestamp: str):
     save_json(history, HISTORY_FILE)
 
 
-# ============================================================================
-# ОСНОВНА ФУНКЦІЯ
-# ============================================================================
-
 def main():
-    """Основна функція моніторингу"""
+    """Основна функція"""
     timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     logger.info(f"\n{'='*60}")
-    logger.info(f"🚀 СТАРТ МОНІТОРИНГУ [{timestamp}]")
+    logger.info(f"🚀 СТАРТ [{timestamp}]")
     logger.info(f"{'='*60}\n")
     
     try:
-        # 1. Завантажити поточні графіки
         logger.info("Крок 1: Завантаження графіків...")
         current_schedules = fetch_all_schedules()
         
         if not current_schedules:
-            logger.error("❌ Не вдалось завантажити графіки!")
+            logger.error("❌ Не вдалось завантажити!")
             return
         
-        # 2. Перевірити хеш
         logger.info("\nКрок 2: Перевірка хешу...")
         last_hash_data = load_last_hash()
         current_hash = calculate_hash(current_schedules)
         
         if current_hash == last_hash_data.get('schedules_hash'):
-            logger.info("✅ Дані не змінилися. Пропускаємо.")
-            logger.info(f"{'='*60}\n")
+            logger.info("✅ Дані не змінилися.")
             return
         
         logger.info("⚠️  Дані змінилися!")
         
-        # 3. Завантажити попередні графіки
         logger.info("\nКрок 3: Завантаження попередніх...")
         previous_schedules = load_json(PREVIOUS_FILE)
         
-        # 4. Порівняти
-        logger.info("\nКрок 4: Порівняння графіків...")
+        logger.info("\nКрок 4: Порівняння...")
         changes = compare_schedules(current_schedules, previous_schedules)
         
         if changes:
             logger.info(f"✓ Знайдено зміни в {len(changes)} чергах")
             
-            # 5. Форматувати повідомлення
-            logger.info("\nКрок 5: Форматування повідомлення...")
+            logger.info("\nКрок 5: Форматування...")
             message = format_message(changes, timestamp)
             
             if message:
                 logger.info(f"Повідомлення готово:\n{message}\n")
                 
-                # 6. Зберегти в історію
-                logger.info("Крок 6: Збереження в історію...")
+                logger.info("Крок 6: Збереження історії...")
                 save_to_history(changes, timestamp)
                 
-                # 7. Генерація картинки
                 logger.info("\nКрок 7: Генерація картинки...")
                 image_path = None
                 try:
                     from image_generator import generate_image
                     image_path = generate_image(changes, timestamp)
-                    logger.info(f"✓ Картинка створена: {image_path}")
+                    logger.info(f"✓ Картинка: {image_path}")
                 except Exception as e:
-                    logger.warning(f"⚠️  Помилка генерації картинки: {e}")
+                    logger.warning(f"⚠️  Помилка картинки: {e}")
                 
-                # 8. Відправити в Telegram
-                logger.info("\nКрок 8: Відправлення в Telegram...")
+                logger.info("\nКрок 8: Telegram...")
                 try:
                     from telegram_handler import send_notification
                     send_notification(message, image_path)
-                    logger.info("✓ Сповіщення відправлено в Telegram")
+                    logger.info("✓ Telegram OK")
                 except Exception as e:
-                    logger.error(f"❌ Помилка Telegram: {e}")
+                    logger.error(f"❌ Telegram: {e}")
         else:
             logger.info("✓ Змін не знайдено")
         
-        # 9. Зберегти поточне як попереднє
-        logger.info("\nКрок 9: Збереження стану...")
+        logger.info("\nКрок 9: Збереження...")
         save_json(current_schedules, CURRENT_FILE)
         save_json(current_schedules, PREVIOUS_FILE)
-        
-        # 10. Оновити хеш
         save_last_hash(current_schedules, timestamp)
         
         logger.info("\n" + "="*60)
-        logger.info("✅ МОНІТОРИНГ ЗАВЕРШЕНО")
+        logger.info("✅ ГОТОВО")
         logger.info("="*60 + "\n")
         
     except Exception as e:
-        logger.error(f"❌ Крит
+        logger.error(f"❌ ПОМИЛКА: {e}", exc_info=True)
+
+
+if __name__ == '__main__':
+    main()
