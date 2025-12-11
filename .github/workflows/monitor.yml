@@ -1,76 +1,45 @@
-name: Schedule Monitor
+name: Monitor Schedule Updates
 
 on:
   schedule:
-    - cron: '*/5 * * * *'
-  
+    - cron: "*/5 * * * *"
   workflow_dispatch:
 
 jobs:
   monitor:
     runs-on: ubuntu-latest
-    
-    permissions:
-      contents: write
-      pull-requests: write
-    
+
     steps:
-      - name: Checkout code
+      - name: Checkout repository
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      
+
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
-          cache: 'pip'
-      
+          python-version: "3.11"
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-      
-      - name: Run monitor
+          python -m playwright install chromium --with-deps
+
+      - name: Run monitoring script
         env:
           API_BASE_URL: ${{ secrets.API_BASE_URL }}
+          URL: ${{ secrets.URL }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHANNEL_ID: ${{ secrets.TELEGRAM_CHANNEL_ID }}
+          TELEGRAM_LOG_CHANNEL_ID: ${{ secrets.TELEGRAM_LOG_CHANNEL_ID }}
+          SUBSCRIBE: ${{ secrets.SUBSCRIBE }}
         run: python monitor.py
-      
-      - name: Commit and push changes
-        if: always()
+
+      - name: Commit changes (API hash/history)
         run: |
-          git config --local user.email "action@github.com"
-          git config --local user.name "GitHub Action"
-          git add -A || true
-          git commit -m "📊 Auto-update $(date -u +'%Y-%m-%d %H:%M:%S')" || true
-          git push
-      
-      - name: Send Telegram notification on success
-        if: success()
-        uses: appleboy/telegram-action@master
-        with:
-          to: ${{ secrets.TELEGRAM_CHANNEL_ID }}
-          token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          message: |
-            ✅ Monitor запустився успішно!
-            
-            Час: $(date -u +'%Y-%m-%d %H:%M:%S')
-            Репозиторій: ${{ github.repository }}
-            Запуск: ${{ github.run_id }}
-      
-      - name: Send Telegram notification on failure
-        if: failure()
-        uses: appleboy/telegram-action@master
-        with:
-          to: ${{ secrets.TELEGRAM_CHANNEL_ID }}
-          token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          message: |
-            ❌ Monitor завершився з помилкою!
-            
-            Час: $(date -u +'%Y-%m-%d %H:%M:%S')
-            Репозиторій: ${{ github.repository }}
-            Запуск: ${{ github.run_id }}
-            
-            Переглянь логи: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add data/last_hash.json data/current.json data/previous.json data/history.json || true
+          git diff --quiet && git diff --staged --quiet || git commit -m "Update schedule [skip ci]"
+
+      - name: Push changes
+        run: git push || true
