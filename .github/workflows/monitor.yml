@@ -25,10 +25,6 @@ jobs:
           python -m pip install --upgrade pip
           pip install requests pytz
       
-      - name: Export all queues (перша мініта часу)
-        if: github.event.schedule == '*/5 * * * *' && github.run_number % 12 == 1
-        run: python export_all_queues.py
-      
       - name: Run monitoring script
         env:
           API_BASE_URL: ${{ secrets.API_BASE_URL }}
@@ -38,10 +34,9 @@ jobs:
           SUBSCRIBE: ${{ secrets.SUBSCRIBE }}
         run: python monitor_all_queues.py
       
-      - name: Commit changes
+      - name: Commit and push changes
         run: |
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
           git add .
-          git commit -m "Update queues" || echo "No changes to commit"
-          git push
+          git diff --quiet && git diff --staged --quiet || (git commit -m "Update monitoring data" && git push)
