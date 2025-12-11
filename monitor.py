@@ -188,11 +188,11 @@ def main():
         final_message = (
             f"Для {queues_str} 🔔 ОНОВЛЕННЯ ГРАФІКА ВІДКЛЮЧЕНЬ\n\n"
             f"{message_content}\n\n"
-            f"🔗 Переглянути графік на сайті\n{URL}\n\n"
+            f'<a href="{URL}">🔗 Переглянути графік на сайті</a>\n\n'
         )
         if date_content:
             final_message += f"{date_content}\n\n"
-        final_message += f"⚡ ПІДПИСАТИСЯ ⚡\n{SUBSCRIBE}"
+        final_message += f'<a href="{SUBSCRIBE}">⚡️ ПІДПИСАТИСЯ ⚡️</a>'
 
         # 9. Відправити в Telegram
         from pathlib import Path as _Path
