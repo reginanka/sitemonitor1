@@ -172,15 +172,15 @@ def main():
             log_to_buffer("❌ Не вдалося створити скріншот")
 
         # 6. Формування повідомлення для каналу
-        queues_str = format_queues(changed_queues)
-        final_message = (
-            f"Для {queues_str} 🔔 ОНОВЛЕННЯ ГРАФІКА ВІДКЛЮЧЕНЬ\n\n"
-            f"{message_content}\n\n"
-            f'\n\n<a href="{URL}">🔗 Переглянути графік на сайті </a>\n\n'
-        )
-        if date_content:
-            final_message += f"{date_content}\n\n"
-        final_message += f'<a href="{SUBSCRIBE}">⚡ ПІДПИСАТИСЯ ⚡</a>'
+queues_str = format_queues(changed_queues)
+final_message = (
+    f"Для {queues_str} 🔔 ОНОВЛЕННЯ ГРАФІКА ВІДКЛЮЧЕНЬ\n\n"
+    f"{message_content}\n\n"
+    f"🔗 Переглянути графік на сайті\n{URL}\n\n"
+)
+if date_content:
+    final_message += f"{date_content}\n\n"
+final_message += f"⚡ ПІДПИСАТИСЯ ⚡\n{SUBSCRIBE}"
 
         # 7. Відправити в Telegram
         from pathlib import Path as _Path
