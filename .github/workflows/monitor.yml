@@ -8,6 +8,8 @@ on:
 jobs:
   monitor:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
 
     steps:
       - name: Checkout repository
@@ -34,12 +36,12 @@ jobs:
           SUBSCRIBE: ${{ secrets.SUBSCRIBE }}
         run: python monitor.py
 
-      - name: Commit changes (API hash/history)
-  run: |
-    git config --local user.email "github-actions[bot]@users.noreply.github.com"
-    git config --local user.name "github-actions[bot]"
-    git add data/last_hash.json data/current.json data/previous.json || true
-    git diff --quiet && git diff --staged --quiet || git commit -m "Update schedule [skip ci]"
+      - name: Commit changes
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add data/last_hash.json data/current.json data/previous.json || true
+          git diff --quiet && git diff --staged --quiet || git commit -m "Update schedule [skip ci]"
 
-- name: Push changes
-  run: git push || true
+      - name: Push changes
+        run: git push || true
