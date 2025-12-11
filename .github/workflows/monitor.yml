@@ -40,7 +40,7 @@ jobs:
         run: |
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
-          git add data/last_hash.json data/current.json data/previous.json || true
+          git add data/current.json data/last_hash.json || true
           git diff --quiet && git diff --staged --quiet || git commit -m "Update schedule [skip ci]"
 
       - name: Push changes
