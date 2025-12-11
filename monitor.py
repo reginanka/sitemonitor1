@@ -24,12 +24,6 @@ HASH_FILE = DATA_DIR / "last_hash.json"
 
 
 def fetch_schedule(cherga_id: int, pidcherga_id: int) -> List[Dict]:
-    """
-    Тягне графік для однієї черги.
-    API повертає рядок на кшталт:
-    {"cherga":"1",...},{"cherga":"1",...},...
-    Тому парсимо через resp.text і обгортаємо в [].
-    """
     resp: Optional[requests.Response] = None
     try:
         params = {"cherga_id": cherga_id, "pidcherga_id": pidcherga_id}
