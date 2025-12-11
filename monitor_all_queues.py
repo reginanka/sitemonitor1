@@ -56,7 +56,6 @@ class MultiQueueMonitor:
         try:
             ukraine_time = datetime.now(pytz.utc).astimezone(UKRAINE_TZ)
 
-            # Для HTML-режиму робимо простий текст без Markdown `**`
             log_text = "📊 ЛОГ МОНІТОРИНГУ ВСІХ ЧЕРГ\n\n"
             log_text += "\n".join(self.log_messages[-50:])
             log_text += (
@@ -115,10 +114,6 @@ class MultiQueueMonitor:
             self.log(f"❌ Помилка запису {self.last_hash_file}: {e}")
 
     def get_current_queues_state(self, all_queues):
-        """
-        Тут можна побудувати агрегований стан по чергах,
-        наприклад згрупувати по queue_id/subqueue_id і т.п.
-        """
         grouped = defaultdict(list)
         for item in all_queues:
             key = (
@@ -131,15 +126,10 @@ class MultiQueueMonitor:
         return grouped
 
     def compute_hash(self, grouped_state):
-        """
-        Рахуємо хеш від серіалізованого стану всіх черг.
-        """
         try:
-            # Перетворюємо в список для стабільного порядку
             normalized = []
             for key in sorted(grouped_state.keys()):
                 records = grouped_state[key]
-                # можна зберігати тільки мінімальний опис, щоб уникнути шуму
                 normalized.append(
                     {
                         "key": key,
@@ -154,12 +144,6 @@ class MultiQueueMonitor:
             return None
 
     def build_change_message(self, diff_info):
-        """
-        Формує текст повідомлення про зміни.
-        diff_info — будь-яка структура, яку ви собі підготуєте
-        під ваші реальні потреби (тут — заглушка).
-        """
-        # Поки що робимо просте повідомлення
         message_lines = ["🔔 ОНОВЛЕННЯ ЧЕРГ", ""]
         message_lines.append("Виявлено зміни в конфігурації черг.")
         message_lines.append("")
@@ -183,21 +167,3 @@ class MultiQueueMonitor:
                 "chat_id": TELEGRAM_CHANNEL_ID,
                 "text": message,
                 "parse_mode": "HTML",
-                "disable_web_page_preview": True,
-            }
-
-            response = requests.post(url, data=data, timeout=10)
-            if response.status_code == 200:
-                self.log("✅ Повідомлення відправлено в канал")
-                return True
-            else:
-                self.log(
-                    f"❌ Помилка відправки повідомлення: {response.status_code}"
-                )
-                return False
-        except Exception as e:
-            self.log(f"❌ Виняток при відправці в Telegram: {e}")
-            return False
-
-    def run(self):
-        if not self.validate_config
