@@ -9,68 +9,39 @@ jobs:
   monitor:
     runs-on: ubuntu-latest
     
+    permissions:
+      contents: write
+      pull-requests: write
+    
     steps:
-      # 1. Завантажити репозиторій
       - name: Checkout code
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
       
-      # 2. Налаштувати Python
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.11'
           cache: 'pip'
       
-      # 3. Встановити залежності
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
       
-      # 4. Запустити моніторинг
       - name: Run monitor
         env:
           API_BASE_URL: ${{ secrets.API_BASE_URL }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHANNEL_ID: ${{ secrets.TELEGRAM_CHANNEL_ID }}
-          TELEGRAM_LOG_CHANNEL_ID: ${{ secrets.TELEGRAM_LOG_CHANNEL_ID }}
         run: python monitor.py
       
-      # 5. Зберегти зміни (якщо вони є)
-      - name: Commit changes
+      - name: Commit and push changes
         if: always()
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
-          git add data/ images/ 2>/dev/null || true
-          git commit -m "📊 Auto-update schedules $(date -u +'%Y-%m-%d %H:%M:%S') UTC" || true
-      
-      # 6. Push зміни
-      - name: Push changes
-        if: always()
-        uses: ad-m/github-push-action@master
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          branch: main
-      
-      # 7. Логування помилок
-      - name: Log on failure
-        if: failure()
-        env:
-          TELEGRAM_LOG_CHANNEL_ID: ${{ secrets.TELEGRAM_LOG_CHANNEL_ID }}
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-        run: |
-          python -c "
-          import os
-          import asyncio
-          from telegram import Bot
-          
-          message = '❌ Monitor failed at $(date -u)\\nCheck logs: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}'
-          bot = Bot(token=os.getenv('TELEGRAM_BOT_TOKEN'))
-          asyncio.run(bot.send_message(
-              chat_id=os.getenv('TELEGRAM_LOG_CHANNEL_ID'),
-              text=message
-          ))
-          "
+          git add -A || true
+          git commit -m "📊 Auto-update $(date -u +'%Y-%m-%d %H:%M:%S')" || true
+          git push
