@@ -21,7 +21,8 @@ async def send_message(message: str, channel_id: str = TELEGRAM_CHANNEL_ID) -> b
         bot = Bot(token=TELEGRAM_BOT_TOKEN)
         await bot.send_message(
             chat_id=channel_id,
-            text=message
+            text=message,
+            parse_mode="HTML"
         )
         logger.info("✓ Повідомлення відправлено в Telegram")
         return True
@@ -47,7 +48,8 @@ async def send_photo(image_path: Path, caption: str = None,
             await bot.send_photo(
                 chat_id=channel_id,
                 photo=f,
-                caption=caption
+                caption=caption,
+                parse_mode="HTML"
             )
         logger.info(f"✓ Картинка відправлена: {image_path.name}")
         return True
@@ -57,16 +59,22 @@ async def send_photo(image_path: Path, caption: str = None,
 
 
 def send_notification(message: str, image_path: Path = None) -> bool:
-    """Синхронна обгортка для відправлення"""
+    """
+    Синхронна обгортка для відправлення.
+    Якщо є картинка — шле повідомлення З картинкою (без дублювання).
+    Якщо нема картинки — шле просто текст.
+    """
     try:
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         
         try:
-            loop.run_until_complete(send_message(message))
-            
             if image_path and image_path.exists():
+                # Шле тільки картинку з caption (одне повідомлення)
                 loop.run_until_complete(send_photo(image_path, caption=message))
+            else:
+                # Шле тільки текст
+                loop.run_until_complete(send_message(message))
             
             return True
         finally:
