@@ -1640,21 +1640,21 @@
       "pidcherga": "1",
       "date": "12.12.2025",
       "span": "20:30-21:00",
-      "color": "red"
+      "color": "white"
     },
     {
       "cherga": "2",
       "pidcherga": "1",
       "date": "12.12.2025",
       "span": "21:00-21:30",
-      "color": "red"
+      "color": "white"
     },
     {
       "cherga": "2",
       "pidcherga": "1",
       "date": "12.12.2025",
       "span": "21:30-22:00",
-      "color": "red"
+      "color": "white"
     },
     {
       "cherga": "2",
@@ -2321,14 +2321,14 @@
       "pidcherga": "2",
       "date": "12.12.2025",
       "span": "21:00-21:30",
-      "color": "red"
+      "color": "white"
     },
     {
       "cherga": "2",
       "pidcherga": "2",
       "date": "12.12.2025",
       "span": "21:30-22:00",
-      "color": "red"
+      "color": "white"
     },
     {
       "cherga": "2",
@@ -5663,70 +5663,70 @@
       "pidcherga": "1",
       "date": "12.12.2025",
       "span": "19:00-19:30",
-      "color": "red"
+      "color": "white"
     },
     {
       "cherga": "5",
       "pidcherga": "1",
       "date": "12.12.2025",
       "span": "19:30-20:00",
-      "color": "red"
+      "color": "white"
     },
     {
       "cherga": "5",
       "pidcherga": "1",
       "date": "12.12.2025",
       "span": "20:00-20:30",
-      "color": "red"
+      "color": "white"
     },
     {
       "cherga": "5",
       "pidcherga": "1",
       "date": "12.12.2025",
       "span": "20:30-21:00",
-      "color": "red"
+      "color": "white"
     },
     {
       "cherga": "5",
       "pidcherga": "1",
       "date": "12.12.2025",
       "span": "21:00-21:30",
-      "color": "red"
+      "color": "white"
     },
     {
       "cherga": "5",
       "pidcherga": "1",
       "date": "12.12.2025",
       "span": "21:30-22:00",
-      "color": "red"
+      "color": "white"
     },
     {
       "cherga": "5",
       "pidcherga": "1",
       "date": "12.12.2025",
       "span": "22:00-22:30",
-      "color": "red"
+      "color": "white"
     },
     {
       "cherga": "5",
       "pidcherga": "1",
       "date": "12.12.2025",
       "span": "22:30-23:00",
-      "color": "red"
+      "color": "white"
     },
     {
       "cherga": "5",
       "pidcherga": "1",
       "date": "12.12.2025",
       "span": "23:00-23:30",
-      "color": "red"
+      "color": "white"
     },
     {
       "cherga": "5",
       "pidcherga": "1",
       "date": "12.12.2025",
       "span": "23:30-24:00",
-      "color": "red"
+      "color": "white"
     },
     {
       "cherga": "5",
@@ -7727,28 +7727,28 @@
       "pidcherga": "2",
       "date": "12.12.2025",
       "span": "22:00-22:30",
-      "color": "red"
+      "color": "white"
     },
     {
       "cherga": "6",
       "pidcherga": "2",
       "date": "12.12.2025",
       "span": "22:30-23:00",
-      "color": "red"
+      "color": "white"
     },
     {
       "cherga": "6",
       "pidcherga": "2",
       "date": "12.12.2025",
       "span": "23:00-23:30",
-      "color": "red"
+      "color": "white"
     },
     {
       "cherga": "6",
       "pidcherga": "2",
       "date": "12.12.2025",
       "span": "23:30-24:00",
-      "color": "red"
+      "color": "white"
     },
     {
       "cherga": "6",
