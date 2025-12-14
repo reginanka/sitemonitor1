@@ -263,19 +263,17 @@ def build_diff(
 
     for queue_key, cur_main_hash in main_hashes.items():
         old_main_hash = last_main.get(queue_key)
+        
+        # Перший запуск — не відправляємо повідомлення, тільки логуємо
         if old_main_hash is None:
-            log_to_buffer(f"ℹ️ Перший запуск для {queue_key}")
-            diff["queues"].append(queue_key)
-            cur_dates = date_hashes.get(queue_key, {})
-            diff["per_queue"][queue_key] = {
-                "new_dates": sorted(cur_dates.keys()),
-                "changed_dates": {},
-            }
+            log_to_buffer(f"ℹ️ Перший запуск для {queue_key}, пропускаємо")
             continue
         
+        # Немає змін
         if old_main_hash == cur_main_hash:
             continue
 
+        # Є зміни — додаємо до diff
         diff["queues"].append(queue_key)
 
         cur_dates = date_hashes.get(queue_key, {})
@@ -348,7 +346,7 @@ def build_notification_text(diff: Dict, url: str, subscribe: str, update_str: st
 
     parts.append(f'<a href="{url}">🔗 Переглянути графік на сайті</a>')
     if update_str:
-        parts.append(f"Дата оновлення інформації - {update_str}")
+        parts.append(update_str)
     parts.append(f'<a href="{subscribe}">⚡️ ПІДПИСАТИСЯ ⚡️</a>')
 
     return "\n\n".join(parts)
