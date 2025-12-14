@@ -28,7 +28,9 @@ def send_log_to_channel() -> None:
 
     try:
         text = "📊 ЛОГ ВИКОНАННЯ СКРИПТА\n\n"
+        text += "<pre>"
         text += "\n".join(log_messages)
+        text += "</pre>"
         text += (
             f"\n\n⏰ Завершено: "
             f"{get_ukraine_time().strftime('%d.%m.%Y %H:%M:%S')} (Київський час)"
