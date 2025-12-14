@@ -1,6 +1,7 @@
 import os
 import json
 import hashlib
+import shutil
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -102,8 +103,7 @@ def normalize_record(rec: Dict, cherga_id: int, pidcherga_id: int) -> Dict:
     """Нормалізація одного запису."""
     date = rec.get("date", "")
     span = rec.get("span", "")
-    color = (rec.get("color") or "").strip().lower()
-    is_off = (color == "red")
+    color = rec.get("color", "").strip().lower()
     return {
         "cherga": cherga_id,
         "pidcherga": pidcherga_id,
@@ -111,7 +111,6 @@ def normalize_record(rec: Dict, cherga_id: int, pidcherga_id: int) -> Dict:
         "date": date,
         "span": span,
         "color": color,
-        "is_off": is_off,
     }
 
 
@@ -144,8 +143,9 @@ def build_state(
         norm_list.sort(key=lambda r: (r["date"], r["span"]))
         norm_by_queue[queue_key] = norm_list
 
-        # Головний хеш черги
-        main_hashes[queue_key] = calculate_hash(norm_list)
+        # Головний хеш черги — від color кожного інтервалу
+        main_hash_data = [{"date": r["date"], "span": r["span"], "color": r["color"]} for r in norm_list]
+        main_hashes[queue_key] = calculate_hash(main_hash_data)
 
         # Хеші по кожному інтервалу
         sh: Dict[str, Dict[str, str]] = {}
@@ -154,8 +154,7 @@ def build_state(
             span = rec["span"]
             if d not in sh:
                 sh[d] = {}
-            # хеш одного інтервалу — тільки is_off
-            sh[d][span] = calculate_hash({"is_off": rec["is_off"]})
+            sh[d][span] = calculate_hash({"color": rec["color"]})
         
         span_hashes[queue_key] = sh
 
@@ -163,32 +162,34 @@ def build_state(
 
 
 def load_last_state():
-    data = load_json(HASH_FILE)
+    """Завантажує хеші з last_hash.json + дані з previous.json"""
+    hash_data = load_json(HASH_FILE)
+    prev_norm = load_json(PREVIOUS_FILE)
+    
     return {
-        "timestamp": data.get("timestamp"),
-        "main_hashes": data.get("main_hashes", {}),
-        "span_hashes": data.get("span_hashes", {}),
-        "norm_by_queue": data.get("norm_by_queue", {}),
+        "timestamp": hash_data.get("timestamp"),
+        "main_hashes": hash_data.get("main_hashes", {}),
+        "span_hashes": hash_data.get("span_hashes", {}),
+        "norm_by_queue": prev_norm,
     }
 
 
 def save_state(
     main_hashes: Dict[str, str],
     span_hashes: Dict[str, Dict[str, Dict[str, str]]],
-    norm_by_queue: Dict[str, List[Dict]],
     timestamp: str
 ) -> None:
+    """Зберігає тільки хеші в last_hash.json"""
     data = {
         "timestamp": timestamp,
         "main_hashes": main_hashes,
         "span_hashes": span_hashes,
-        "norm_by_queue": norm_by_queue,
     }
     save_json(data, HASH_FILE)
 
 
 def parse_span(span: str) -> Tuple[str, str]:
-    """0900-0930 -> (09:00, 09:30)"""
+    """0000-0030 -> (00:00, 00:30)"""
     if not span or "-" not in span:
         return ("", "")
     start, end = span.split("-")
@@ -250,6 +251,7 @@ def build_diff(
             continue
 
         # Є зміни — шукаємо деталі
+        log_to_buffer(f"🔍 Аналізую зміни для {queue_key}")
         cur_sh = span_hashes.get(queue_key, {})
         old_sh = last_span.get(queue_key, {})
         
@@ -258,10 +260,13 @@ def build_diff(
             continue
 
         new_dates = sorted(d for d in cur_sh.keys() if d not in old_sh)
+        if new_dates:
+            log_to_buffer(f"  📅 Нові дати: {new_dates}")
+        
         changed_dates = {}
 
         cur_items = norm_by_queue.get(queue_key, [])
-        old_items_all = last_norm.get(queue_key, [])
+        old_items_list = last_norm.get(queue_key, [])
 
         for d in cur_sh.keys():
             if d in new_dates:
@@ -278,17 +283,26 @@ def build_diff(
                 if old_span_hash == cur_span_hash:
                     continue
                 
-                # Хеш інтервалу змінився — знаходимо старий і новий запис
-                new_rec = next((r for r in cur_items if r["date"] == d and r["span"] == span), None)
-                old_rec = next((r for r in old_items_all if r["date"] == d and r["span"] == span), None)
+                # Хеш інтервалу змінився
+                log_to_buffer(f"  🔄 Інтервал {span} дата {d}: хеш змінився")
                 
-                if new_rec and old_rec and new_rec["is_off"] != old_rec["is_off"]:
-                    change = "added" if new_rec["is_off"] else "removed"
-                    changes_for_date.append({"span": span, "change": change})
+                # Знаходимо старий і новий запис
+                new_rec = next((r for r in cur_items if r["date"] == d and r["span"] == span), None)
+                old_rec = next((r for r in old_items_list if r["date"] == d and r["span"] == span), None)
+                
+                if new_rec and old_rec:
+                    log_to_buffer(f"    Старий: color={old_rec['color']}, Новий: color={new_rec['color']}")
+                    if new_rec["color"] != old_rec["color"]:
+                        change = "added" if new_rec["color"] == "red" else "removed"
+                        changes_for_date.append({"span": span, "change": change})
+                        log_to_buffer(f"    ✅ Зміна: {change}")
+                else:
+                    log_to_buffer(f"    ⚠️ Не знайдено запис: new_rec={bool(new_rec)}, old_rec={bool(old_rec)}")
 
             if changes_for_date:
                 grouped = group_spans(changes_for_date)
                 changed_dates[d] = grouped
+                log_to_buffer(f"  ✅ Для дати {d} знайдено {len(changes_for_date)} змін")
 
         if new_dates or changed_dates:
             diff["queues"].append(queue_key)
@@ -296,6 +310,7 @@ def build_diff(
                 "new_dates": new_dates,
                 "changed_dates": changed_dates,
             }
+            log_to_buffer(f"✅ Додано {queue_key} до diff")
         else:
             log_to_buffer(f"⚠️ Хеш змінився для {queue_key}, але конкретні зміни не виявлені")
 
@@ -358,15 +373,20 @@ def main():
             log_to_buffer("❌ Не вдалось завантажити жоден графік")
             return
 
-        # 2. Зберегти поточні графіки
-        save_json(current_schedules, CURRENT_FILE)
-        log_to_buffer("💾 Графіки збережено в data/current.json")
-
-        # 3. Побудувати поточний стан
+        # 2. Побудувати поточний стан
         norm_by_queue, current_main_hashes, current_span_hashes = build_state(
             current_schedules, has_error
         )
         log_to_buffer(f"🔐 Витягнено хеші для {len(current_main_hashes)} черг")
+
+        # 3. Зберегти поточні нормалізовані дані
+        # Спочатку копіюємо current → previous
+        if CURRENT_FILE.exists():
+            shutil.copy(CURRENT_FILE, PREVIOUS_FILE)
+            log_to_buffer("📋 Попередній current.json скопійовано в previous.json")
+        
+        save_json(norm_by_queue, CURRENT_FILE)
+        log_to_buffer("💾 Нормалізовані дані збережено в data/current.json")
 
         # 4. Завантажити попередній стан
         last_state = load_last_state()
@@ -377,7 +397,7 @@ def main():
 
         if not diff["queues"]:
             log_to_buffer("✅ Дані по всіх чергах не змінилися")
-            save_state(current_main_hashes, current_span_hashes, norm_by_queue, timestamp)
+            save_state(current_main_hashes, current_span_hashes, timestamp)
             return
 
         log_to_buffer(f"🔔 Зміни виявлено для: {', '.join(diff['queues'])}")
@@ -407,9 +427,9 @@ def main():
         else:
             log_to_buffer("❌ Помилка надсилання повідомлення в канал")
 
-        # 10. Оновити стан
-        save_state(current_main_hashes, current_span_hashes, norm_by_queue, timestamp)
-        log_to_buffer("💾 Стан оновлено в data/last_hash.json")
+        # 10. Оновити тільки хеші
+        save_state(current_main_hashes, current_span_hashes, timestamp)
+        log_to_buffer("💾 Хеші оновлено в data/last_hash.json")
 
     except Exception as e:
         log_to_buffer(f"❌ Критична помилка: {e}")
