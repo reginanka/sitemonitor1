@@ -3,7 +3,7 @@ import json
 import hashlib
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 import requests
 
@@ -24,7 +24,13 @@ CURRENT_FILE = DATA_DIR / "current.json"
 HASH_FILE = DATA_DIR / "last_hash.json"
 
 
-def fetch_schedule(cherga_id: int, pidcherga_id: int) -> List[Dict]:
+def fetch_schedule(cherga_id: int, pidcherga_id: int) -> Tuple[List[Dict], bool]:
+    """
+    Тягне графік для однієї черги.
+    Повертає (дані, is_error).
+    is_error=True означає, що була помилка (таймаут, 500 тощо).
+    is_error=False означає валідну відповідь (навіть якщо 0 записів).
+    """
     resp: Optional[requests.Response] = None
     try:
         params = {"cherga_id": cherga_id, "pidcherga_id": pidcherga_id}
@@ -41,10 +47,10 @@ def fetch_schedule(cherga_id: int, pidcherga_id: int) -> List[Dict]:
             data = json.loads(text)
 
         if isinstance(data, list):
-            return data
+            return data, False  # ← Валідна відповідь, без помилки
 
         log_to_buffer(f"⚠️ Відповідь не список для {cherga_id}.{pidcherga_id}")
-        return []
+        return [], False
 
     except Exception as e:
         body = resp.text[:200] if resp is not None else ""
@@ -52,20 +58,24 @@ def fetch_schedule(cherga_id: int, pidcherga_id: int) -> List[Dict]:
             f"❌ Помилка {cherga_id}.{pidcherga_id}: {e}. "
             f"Фрагмент відповіді: {body}"
         )
-        return []
+        return [], True  # ← ПОМИЛКА! is_error=True
 
 
-def fetch_all_schedules() -> Dict[str, List[Dict]]:
+def fetch_all_schedules() -> Tuple[Dict[str, List[Dict]], Dict[str, bool]]:
+    """Повертає (дані, словник помилок)."""
     all_schedules: Dict[str, List[Dict]] = {}
+    has_error: Dict[str, bool] = {}
     log_to_buffer("📡 Завантажую графіки по всіх чергах...")
 
     for cherga_id, pidcherga_id in QUEUES:
         queue_key = f"{cherga_id}.{pidcherga_id}"
-        schedule = fetch_schedule(cherga_id, pidcherga_id)
+        schedule, is_error = fetch_schedule(cherga_id, pidcherga_id)
         all_schedules[queue_key] = schedule
-        log_to_buffer(f"  ✓ {queue_key}: {len(schedule)} записів")
+        has_error[queue_key] = is_error
+        error_note = " [помилка API]" if is_error else ""
+        log_to_buffer(f"  ✓ {queue_key}: {len(schedule)} записів{error_note}")
 
-    return all_schedules
+    return all_schedules, has_error
 
 
 def save_json(data, path: Path) -> None:
@@ -89,11 +99,13 @@ def calculate_hash(obj) -> str:
     return hashlib.md5(json_str.encode("utf-8")).hexdigest()
 
 
-def extract_hashes(schedules: Dict[str, List[Dict]]) -> Dict[str, str]:
-    """Витягує хеши для кожної черги"""
+def extract_hashes(schedules: Dict[str, List[Dict]], has_error: Dict[str, bool]) -> Dict[str, str]:
+    """Витягує хеши для кожної черги, ігноруючи черги з помилками"""
     hashes = {}
     for queue_key, schedule in schedules.items():
-        hashes[queue_key] = calculate_hash(schedule)
+        # Зберігаємо хеш ТІЛЬКИ якщо немає помилки API
+        if not has_error.get(queue_key, False):
+            hashes[queue_key] = calculate_hash(schedule)
     return hashes
 
 
@@ -144,7 +156,7 @@ def main():
 
     try:
         # 1. Завантажити графіки з API
-        current_schedules = fetch_all_schedules()
+        current_schedules, has_error = fetch_all_schedules()
         if not current_schedules:
             log_to_buffer("❌ Не вдалось завантажити жоден графік")
             return
@@ -153,8 +165,8 @@ def main():
         save_json(current_schedules, CURRENT_FILE)
         log_to_buffer("💾 Графіки збережено в data/current.json")
 
-        # 3. Витягти хеші поточних графіків
-        current_hashes = extract_hashes(current_schedules)
+        # 3. Витягти хеші поточних графіків (ігноруючи черги з помилками)
+        current_hashes = extract_hashes(current_schedules, has_error)
         log_to_buffer(f"🔐 Витягнено хеші для {len(current_hashes)} черг")
 
         # 4. Завантажити попередні хеші
