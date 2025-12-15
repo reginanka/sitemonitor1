@@ -417,7 +417,7 @@ def main():
             SUBSCRIBE,
             date_content or "",
         )
-
+ 
         # 9. Відправити в Telegram
         from pathlib import Path as _Path
         img_path = _Path(screenshot_path) if screenshot_path else None
