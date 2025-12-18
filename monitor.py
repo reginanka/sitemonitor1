@@ -326,46 +326,62 @@ def build_diff(
 
 
 def build_new_schedule_message(
-    norm_by_queue: Dict[str, List[Dict]], 
-    new_date: str, 
-    url: str, 
-    subscribe: str, 
+    norm_by_queue: Dict[str, List[Dict]],
+    new_date: str,
+    url: str,
+    subscribe: str,
     update_str: str
 ) -> str:
-    """Повідомлення про новий графік з усіма відключеннями"""
-    parts = ["🔔Додано новий графік на завтра!\n"]
+    """Компактне повідомлення про новий графік"""
+    parts = ["🔔 Графік на завтра\n"]
     
     for queue_key in sorted(norm_by_queue.keys()):
         records = norm_by_queue[queue_key]
-        
-        # Беремо ВСІ red інтервали для нової дати
         outages = [r for r in records if r["date"] == new_date and r["color"] == "red"]
         
         if not outages:
             continue
         
-        parts.append(f"▶️ Черга {queue_key}:")
-        parts.append(f" {new_date}")
-        
-        # Групуємо інтервали
         grouped = group_spans([{"span": o["span"], "change": "added"} for o in outages])
-        for g in grouped:
-            parts.append(f"{g['start']}-{g['end']} 🪫відключення ❌")
         
-        parts.append("")
+        time_ranges = []
+        for g in grouped:
+            start = g['start'].lstrip('0') or '0:00'
+            end = g['end'].lstrip('0') or '0:00'
+            if start.startswith(':'):
+                start = '0' + start
+            if end.startswith(':'):
+                end = '0' + end
+            time_ranges.append(f"{start}-{end}")
+        
+        times_str = ", ".join(time_ranges)
+        parts.append(f"Черга {queue_key}: ❌{times_str}")
     
-    parts.append(f'<a href="{url}">🔗 Переглянути графік на сайті</a>')
+    parts.append("")
+    
+    # Форматуємо дату оновлення
+    date_str = ""
     if update_str:
-        parts.append(update_str)
-    parts.append(f'<a href="{subscribe}">⚡️ ПІДПИСАТИСЯ ⚡️</a>')
+        import re
+        match = re.search(r'(\d{2}:\d{2})\s+(\d{2}\.\d{2})\.\d{4}', update_str)
+        if match:
+            date_str = f"🕐 {match.group(1)} {match.group(2)}"
+    
+    # ГОЛОВНЕ ВИПРАВЛЕННЯ: лапки всередині f-рядка
+    parts.append(
+        f'<a href="{url}">🔗 Переглянути графік</a> | '
+        f'<a href="{subscribe}">⚡️ ПІДПИСАТИСЯ ⚡️</a>'
+    )
+    if date_str:
+        parts.append(date_str)
     
     return "\n".join(parts)
+
 
 
 def build_changes_notification(diff: Dict, url: str, subscribe: str, update_str: str) -> str:
     queues = sorted(diff["queues"])
 
-    # Побудуємо структуру: date -> queue -> list[ranges]
     by_date: Dict[str, Dict[str, List[Dict]]] = {}
     for q in queues:
         info = diff["per_queue"].get(q, {})
@@ -378,14 +394,10 @@ def build_changes_notification(diff: Dict, url: str, subscribe: str, update_str:
 
     parts = []
 
-    # Заголовок
     parts.append(f"Для черг {', '.join(queues)} 🔔 ОНОВЛЕННЯ ГРАФІКА ВІДКЛЮЧЕНЬ!")
     parts.append("⬇️⬇️⬇️\n")
 
-    # Проходимо по датах у порядку зростання
     for d in sorted(by_date.keys()):
-        # Заголовок дати
-        # d у тебе формат типу 2025-12-18 → перетворимо на 18.12.2025
         try:
             dt = datetime.strptime(d, "%Y-%m-%d")
             date_str = dt.strftime("%d.%m.%Y")
@@ -394,23 +406,25 @@ def build_changes_notification(diff: Dict, url: str, subscribe: str, update_str:
 
         parts.append(f"🗓{date_str} \n")
 
-        # Для кожної черги в межах цієї дати
         for q in sorted(by_date[d].keys(), key=lambda x: tuple(map(int, x.split(".")))):
             parts.append(f"▶️ Черга {q}:")
             for r in by_date[d][q]:
                 action = "🪫додали відключення ❌" if r["change"] == "added" else "🔋скасували відключення💡"
                 parts.append(f"{r['start']}-{r['end']} {action}")
-            parts.append("")  # порожній рядок між чергами
+            parts.append("")
 
-        parts.append("〰️〰️〰️〰️〰️〰️")  # розділювач між датами
+        parts.append("〰️〰️〰️〰️〰️〰️")
 
-    # Посилання + підпис
-    parts.append(f'<a href="{url}">🔗 Переглянути графік на сайті</a>\n')
-    if update_str:
-        parts.append(update_str)
-    parts.append(f'<a href="{subscribe}">⚡️ ПІДПИСАТИСЯ ⚡️</a>')
-
+    # тут так само: правильні лапки в f-рядку
+    parts.append(
+        f'<a href="{url}">🔗 Переглянути графік</a> | '
+        f'<a href="{subscribe}">⚡️ ПІДПИСАТИСЯ ⚡️</a>'
+    )
+    if date_str:
+        parts.append(date_str)
+    
     return "\n".join(parts)
+
 
 
 
