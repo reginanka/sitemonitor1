@@ -405,11 +405,10 @@ def build_new_schedule_notification(
     subscribe: str,
     update_str: str
 ) -> str:
-    """Повідомлення про НОВИЙ графік"""
-    queues = sorted(diff["queues"])
+    """Компактне повідомлення про НОВИЙ графік"""
     
     parts = []
-    parts.append("🔔Додано новий графік на завтра!")
+    parts.append("🔔 Додано новий графік на завтра!")
     parts.append("⬇️⬇️⬇️\n")
     
     # Дата оновлення
@@ -430,28 +429,32 @@ def build_new_schedule_notification(
         
         parts.append(f"🗓 {formatted_date}\n")
         
-        for queue_key in sorted(queues, key=lambda x: tuple(map(int, x.split(".")))):
+        # Отримуємо всі черги що мають відключення на цю дату
+        queues_with_outages = []
+        for queue_key in sorted(diff["queues"], key=lambda x: tuple(map(int, x.split(".")))):
             records = norm_by_queue.get(queue_key, [])
             outages = [r for r in records if r["date"] == date and r["color"] == "red"]
             
-            if not outages:
-                continue
-            
-            parts.append(f"▶️ Черга {queue_key}:")
-            
-            grouped = group_spans([{"span": o["span"], "change": "added"} for o in outages])
-            for g in grouped:
-                start = g['start'].lstrip('0') or '0:00'
-                end = g['end'].lstrip('0') or '0:00'
-                if start.startswith(':'):
-                    start = '0' + start
-                if end.startswith(':'):
-                    end = '0' + end
-                parts.append(f"{start}-{end} ❌ відключення")
-            
-            parts.append("")
+            if outages:
+                grouped = group_spans([{"span": o["span"], "change": "added"} for o in outages])
+                
+                # Форматуємо часи компактно
+                time_ranges = []
+                for g in grouped:
+                    start = g['start'].lstrip('0') or '0:00'
+                    end = g['end'].lstrip('0') or '0:00'
+                    if start.startswith(':'):
+                        start = '0' + start
+                    if end.startswith(':'):
+                        end = '0' + end
+                    time_ranges.append(f"{start}-{end}")
+                
+                times_str = ", ".join(time_ranges)
+                queues_with_outages.append(f"Черга {queue_key}: ❌{times_str}")
         
-        parts.append("〰️〰️〰️〰️〰️〰️\n")
+        # Додаємо всі черги для цієї дати
+        parts.extend(queues_with_outages)
+        parts.append("")
     
     # Посилання
     parts.append(
@@ -466,21 +469,24 @@ def build_new_schedule_notification(
 
 def send_notification_safe(message: str, img_path=None) -> bool:
     """Надсилає повідомлення з перевіркою лімітів Telegram"""
-    CAPTION_LIMIT = 1024
-    TEXT_LIMIT = 4096
+    CAPTION_LIMIT = 1024  # Ліміт для caption з фото
+    TEXT_LIMIT = 4096     # Ліміт для звичайного text повідомлення
     
     msg_len = len(message)
     log_to_buffer(f"📝 Довжина повідомлення: {msg_len} символів")
     
     # Якщо є фото і текст не влазить в caption
     if img_path and msg_len > CAPTION_LIMIT:
-        log_to_buffer(f"⚠️ Текст {msg_len} > {CAPTION_LIMIT} (ліміт caption), надсилаю без фото")
+        log_to_buffer(f"⚠️ Текст {msg_len} > {CAPTION_LIMIT} (ліміт caption), надсилаю спочатку фото, потім текст")
+        # Спочатку надсилаємо фото без тексту
+        send_notification("📸", img_path)
+        # Потім надсилаємо текст окремим повідомленням
         if msg_len > TEXT_LIMIT:
             log_to_buffer(f"⚠️ Текст {msg_len} > {TEXT_LIMIT}, обрізаю")
             message = message[:TEXT_LIMIT-100] + "\n\n... (текст скорочено)"
         return send_notification(message, None)
     
-    # Якщо немає фото, але текст завеликий
+    # Якщо немає фото, але текст завеликий для text повідомлення
     if not img_path and msg_len > TEXT_LIMIT:
         log_to_buffer(f"⚠️ Текст {msg_len} > {TEXT_LIMIT}, обрізаю")
         message = message[:TEXT_LIMIT-100] + "\n\n... (текст скорочено)"
