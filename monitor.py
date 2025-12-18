@@ -366,12 +366,12 @@ def build_notification_text(diff: Dict, url: str, subscribe: str, update_str: st
     if queue_blocks:
         parts.append("\n\n".join(queue_blocks))
     
-    parts.append(f'🔗 [Переглянути графік на сайті]({url})')
+    parts.append(f'<a href="{URL}">🔗 Переглянути графік на сайті </a>')
     
     if update_str:
         parts.append(update_str)
     
-    parts.append(f'[⚡️ ПІДПИСАТИСЯ ⚡️]({subscribe})')
+    parts.append(f'<a href="{SUBSCRIBE}">⚡ ПІДПИСАТИСЯ ⚡</a>')
     
     return "\n\n".join(parts)
 
