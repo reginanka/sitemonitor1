@@ -331,9 +331,9 @@ def build_notification_text(diff: Dict, url: str, subscribe: str, update_str: st
             any_changed = True
             for d, ranges in info["changed_dates"].items():
                 for r in ranges:
-                    action = "додали відключення" if r["change"] == "added" else "скасували відключення"
+                    action = "🪫додали відключення ❌" if r["change"] == "added" else "🔋скасували відключення💡"
                     lines.append(
-                        f"Черга {q}: {d} {r['start']}-{r['end']} {action}"
+                        f"▶️ Черга {q}:\n {d} {r['start']}-{r['end']} {action}"
                     )
 
     if any_changed and any_new:
