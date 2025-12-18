@@ -396,18 +396,21 @@ def build_changes_notification(
                 else:
                     action = "🔋 скасували відключення 💡"
                     parts.append(f"<s>{start}-{end}</s> {action}")
+            
+            parts.append("")  # ВИПРАВЛЕННЯ: Порожній рядок після КОЖНОЇ черги
         
         parts.append("〰️〰️〰️〰️〰️〰️\n")
     
     # Посилання
     parts.append(
         f'<a href="{url}">🔗 Переглянути графік</a> | '
-        f'<a href="{subscribe}">⚡️ ПІДПИСАТИСЯ </a>'
+        f'<a href="{subscribe}">⚡️ ПІДПИСАТИСЯ</a>'
     )
     if update_date_str:
         parts.append(update_date_str)
     
     return "\n".join(parts)
+
 
 
 def build_new_schedule_notification(
