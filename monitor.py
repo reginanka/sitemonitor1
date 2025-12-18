@@ -5,9 +5,7 @@ import shutil
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
-
 import requests
-
 from log_utils import log_to_buffer, send_log_to_channel
 from site_content import get_schedule_content, take_screenshot_between_elements
 from telegram_handler import send_notification
@@ -36,9 +34,7 @@ def fetch_schedule(cherga_id: int, pidcherga_id: int) -> Tuple[List[Dict], bool]
         params = {"cherga_id": cherga_id, "pidcherga_id": pidcherga_id}
         resp = requests.get(API_BASE_URL, params=params, timeout=10)
         resp.raise_for_status()
-
         text = resp.text.strip()
-
         if text.startswith("[") and text.endswith("]"):
             data = json.loads(text)
         else:
@@ -65,15 +61,16 @@ def fetch_all_schedules() -> Tuple[Dict[str, List[Dict]], Dict[str, bool]]:
     """Повертає (дані, словник помилок)."""
     all_schedules: Dict[str, List[Dict]] = {}
     has_error: Dict[str, bool] = {}
-    log_to_buffer("📡 Завантажую графіки по всіх чергах...")
 
+    log_to_buffer("📡 Завантажую графіки по всіх чергах...")
     for cherga_id, pidcherga_id in QUEUES:
         queue_key = f"{cherga_id}.{pidcherga_id}"
         schedule, is_error = fetch_schedule(cherga_id, pidcherga_id)
         all_schedules[queue_key] = schedule
         has_error[queue_key] = is_error
+
         error_note = " [помилка API]" if is_error else ""
-        log_to_buffer(f"  ✓ {queue_key}: {len(schedule)} записів{error_note}")
+        log_to_buffer(f" ✓ {queue_key}: {len(schedule)} записів{error_note}")
 
     return all_schedules, has_error
 
@@ -104,6 +101,7 @@ def normalize_record(rec: Dict, cherga_id: int, pidcherga_id: int) -> Dict:
     date = rec.get("date", "")
     span = rec.get("span", "")
     color = rec.get("color", "").strip().lower()
+
     return {
         "cherga": cherga_id,
         "pidcherga": pidcherga_id,
@@ -118,9 +116,9 @@ def build_state(
     raw_schedules: Dict[str, List[Dict]],
     has_error: Dict[str, bool],
 ) -> Tuple[
-    Dict[str, List[Dict]],                    # norm_by_queue
-    Dict[str, str],                           # main_hashes
-    Dict[str, Dict[str, Dict[str, str]]]      # span_hashes[queue][date][span]
+    Dict[str, List[Dict]], # norm_by_queue
+    Dict[str, str], # main_hashes
+    Dict[str, Dict[str, Dict[str, str]]] # span_hashes[queue][date][span]
 ]:
     """
     Будує нормалізований стан з хешами по інтервалах.
@@ -187,6 +185,7 @@ def save_state(
     }
     save_json(data, HASH_FILE)
 
+
 def parse_span(span: str) -> Tuple[str, str]:
     """0000-0030 або 00:00-00:30 -> (00:00, 00:30)"""
     if not span or "-" not in span:
@@ -197,6 +196,7 @@ def parse_span(span: str) -> Tuple[str, str]:
         return start, end
     return f"{start[:2]}:{start[2:]}", f"{end[:2]}:{end[2:]}"
 
+
 def group_spans(spans_changes: List[Dict]) -> List[Dict]:
     """Групує сусідні інтервали з однаковим типом зміни."""
     result: List[Dict] = []
@@ -204,6 +204,7 @@ def group_spans(spans_changes: List[Dict]) -> List[Dict]:
 
     for item in sorted(spans_changes, key=lambda x: x["span"]):
         start_time, end_time = parse_span(item["span"])
+
         if not current:
             current = {
                 "start": start_time,
@@ -223,6 +224,7 @@ def group_spans(spans_changes: List[Dict]) -> List[Dict]:
 
     if current:
         result.append(current)
+
     return result
 
 
@@ -239,6 +241,7 @@ def build_diff(
     diff = {
         "queues": [],
         "per_queue": {},
+        "new_dates": [],  # Глобальний список нових дат
     }
 
     for queue_key, cur_main_hash in main_hashes.items():
@@ -253,6 +256,7 @@ def build_diff(
 
         # Є зміни — шукаємо деталі
         log_to_buffer(f"🔍 Аналізую зміни для {queue_key}")
+
         cur_sh = span_hashes.get(queue_key, {})
         old_sh = last_span.get(queue_key, {})
         
@@ -262,10 +266,13 @@ def build_diff(
 
         new_dates = sorted(d for d in cur_sh.keys() if d not in old_sh)
         if new_dates:
-            log_to_buffer(f"  📅 Нові дати: {new_dates}")
+            log_to_buffer(f" 📅 Нові дати: {new_dates}")
+            # Додаємо до глобального списку
+            for nd in new_dates:
+                if nd not in diff["new_dates"]:
+                    diff["new_dates"].append(nd)
         
         changed_dates = {}
-
         cur_items = norm_by_queue.get(queue_key, [])
         old_items_list = last_norm.get(queue_key, [])
 
@@ -285,25 +292,25 @@ def build_diff(
                     continue
                 
                 # Хеш інтервалу змінився
-                log_to_buffer(f"  🔄 Інтервал {span} дата {d}: хеш змінився")
+                log_to_buffer(f" 🔄 Інтервал {span} дата {d}: хеш змінився")
                 
                 # Знаходимо старий і новий запис
                 new_rec = next((r for r in cur_items if r["date"] == d and r["span"] == span), None)
                 old_rec = next((r for r in old_items_list if r["date"] == d and r["span"] == span), None)
                 
                 if new_rec and old_rec:
-                    log_to_buffer(f"    Старий: color={old_rec['color']}, Новий: color={new_rec['color']}")
+                    log_to_buffer(f" Старий: color={old_rec['color']}, Новий: color={new_rec['color']}")
                     if new_rec["color"] != old_rec["color"]:
                         change = "added" if new_rec["color"] == "red" else "removed"
                         changes_for_date.append({"span": span, "change": change})
-                        log_to_buffer(f"    ✅ Зміна: {change}")
+                        log_to_buffer(f" ✅ Зміна: {change}")
                 else:
-                    log_to_buffer(f"    ⚠️ Не знайдено запис: new_rec={bool(new_rec)}, old_rec={bool(old_rec)}")
+                    log_to_buffer(f" ⚠️ Не знайдено запис: new_rec={bool(new_rec)}, old_rec={bool(old_rec)}")
 
             if changes_for_date:
                 grouped = group_spans(changes_for_date)
                 changed_dates[d] = grouped
-                log_to_buffer(f"  ✅ Для дати {d} знайдено {len(changes_for_date)} змін")
+                log_to_buffer(f" ✅ Для дати {d} знайдено {len(changes_for_date)} змін")
 
         if new_dates or changed_dates:
             diff["queues"].append(queue_key)
@@ -318,47 +325,63 @@ def build_diff(
     return diff
 
 
-def build_notification_text(diff: Dict, url: str, subscribe: str, update_str: str) -> str:
-    queues = sorted(diff["queues"])
-    any_new = False
-    any_changed = False
+def build_new_schedule_message(
+    norm_by_queue: Dict[str, List[Dict]], 
+    new_date: str, 
+    url: str, 
+    subscribe: str, 
+    update_str: str
+) -> str:
+    """Повідомлення про новий графік з усіма відключеннями"""
+    parts = ["🔔Додано новий графік на завтра!\n"]
     
-    # Спочатку перевіряємо типи змін
-    for q in queues:
-        info = diff["per_queue"].get(q, {})
-        if info.get("new_dates"):
-            any_new = True
-        if info.get("changed_dates"):
-            any_changed = True
-    
-    # Формуємо заголовок
-    if any_changed and any_new:
-        title = f"Для черг {', '.join(queues)} 🔔 ОНОВЛЕННЯ ГРАФІКА ВІДКЛЮЧЕНЬ + доданий графік на завтра!"
-    elif any_changed:
-        title = f"Для черг {', '.join(queues)} 🔔 ОНОВЛЕННЯ ГРАФІКА ВІДКЛЮЧЕНЬ"
-    elif any_new:
-        title = "🔔Додано новий графік на завтра!"
-    else:
-        title = ""
-    
-    parts: List[str] = []
-    if title:
-        parts.append(title)
-        parts.append("⬇️⬇️⬇️")
-    
-    # Групуємо зміни по чергах
-    queue_blocks: List[str] = []
-    for q in queues:
-        info = diff["per_queue"].get(q, {})
-        queue_lines: List[str] = []
+    for queue_key in sorted(norm_by_queue.keys()):
+        records = norm_by_queue[queue_key]
         
-        # Додаємо всі зміни для цієї черги
+        # Беремо ВСІ red інтервали для нової дати
+        outages = [r for r in records if r["date"] == new_date and r["color"] == "red"]
+        
+        if not outages:
+            continue
+        
+        parts.append(f"▶️ Черга {queue_key}:")
+        parts.append(f" {new_date}")
+        
+        # Групуємо інтервали
+        grouped = group_spans([{"span": o["span"], "change": "added"} for o in outages])
+        for g in grouped:
+            parts.append(f"{g['start']}-{g['end']} 🪫відключення ❌")
+        
+        parts.append("")
+    
+    parts.append(f'<a href="{url}">🔗 Переглянути графік на сайті</a>')
+    if update_str:
+        parts.append(update_str)
+    parts.append(f'<a href="{subscribe}">⚡️ ПІДПИСАТИСЯ ⚡️</a>')
+    
+    return "\n".join(parts)
+
+
+def build_changes_notification(diff: Dict, url: str, subscribe: str, update_str: str) -> str:
+    """Повідомлення про зміни в існуючих графіках"""
+    queues = sorted(diff["queues"])
+    parts = []
+    
+    # Заголовок тільки для змін
+    parts.append(f"Для черг {', '.join(queues)} 🔔 ОНОВЛЕННЯ ГРАФІКА ВІДКЛЮЧЕНЬ")
+    parts.append("⬇️⬇️⬇️")
+    
+    queue_blocks = []
+    for q in queues:
+        info = diff["per_queue"].get(q, {})
+        queue_lines = []
+        
+        # Тільки changed_dates (не new_dates)
         for d, ranges in sorted(info.get("changed_dates", {}).items()):
             for r in ranges:
                 action = "🪫додали відключення ❌" if r["change"] == "added" else "🔋скасували відключення💡"
                 queue_lines.append(f" {d} {r['start']}-{r['end']} {action}")
         
-        # Якщо є зміни для черги, додаємо блок
         if queue_lines:
             queue_block = f"▶️ Черга {q}:\n" + "\n".join(queue_lines)
             queue_blocks.append(queue_block)
@@ -366,15 +389,12 @@ def build_notification_text(diff: Dict, url: str, subscribe: str, update_str: st
     if queue_blocks:
         parts.append("\n\n".join(queue_blocks))
     
-    parts.append(f'<a href="{URL}">🔗 Переглянути графік на сайті </a>')
-    
+    parts.append(f'<a href="{url}">🔗 Переглянути графік на сайті</a>')
     if update_str:
         parts.append(update_str)
-    
-    parts.append(f'<a href="{SUBSCRIBE}">⚡ ПІДПИСАТИСЯ ⚡</a>')
+    parts.append(f'<a href="{subscribe}">⚡️ ПІДПИСАТИСЯ ⚡️</a>')
     
     return "\n\n".join(parts)
-
 
 
 def main():
@@ -412,7 +432,7 @@ def main():
         # 5. Побудувати diff
         diff = build_diff(norm_by_queue, current_main_hashes, current_span_hashes, last_state)
 
-        if not diff["queues"]:
+        if not diff["queues"] and not diff["new_dates"]:
             log_to_buffer("✅ Дані по всіх чергах не змінилися")
             save_state(current_main_hashes, current_span_hashes, timestamp)
             return
@@ -427,22 +447,43 @@ def main():
         if not screenshot_path:
             log_to_buffer("⚠️ Не вдалося створити скріншот")
 
-        # 8. Формування повідомлення
-        final_message = build_notification_text(
-            diff,
-            URL,
-            SUBSCRIBE,
-            date_content or "",
-        )
- 
-        # 9. Відправити в Telegram
+        # 8. Перевіряємо типи змін
+        has_new = bool(diff["new_dates"])
+        has_changes = any(q_info.get("changed_dates") for q_info in diff["per_queue"].values())
+
+        # 9. Відправка повідомлень
         from pathlib import Path as _Path
         img_path = _Path(screenshot_path) if screenshot_path else None
-        ok = send_notification(final_message, img_path)
-        if ok:
-            log_to_buffer("✅ Повідомлення з оновленням відправлено в канал")
-        else:
-            log_to_buffer("❌ Помилка надсилання повідомлення в канал")
+
+        # Якщо є нова дата - шлемо окреме повідомлення з повним списком
+        if has_new:
+            for new_date in diff["new_dates"]:
+                new_msg = build_new_schedule_message(
+                    norm_by_queue, 
+                    new_date, 
+                    URL, 
+                    SUBSCRIBE, 
+                    date_content or ""
+                )
+                ok = send_notification(new_msg, img_path)
+                if ok:
+                    log_to_buffer(f"✅ Повідомлення про новий графік ({new_date}) відправлено")
+                else:
+                    log_to_buffer(f"❌ Помилка надсилання повідомлення про новий графік ({new_date})")
+
+        # Якщо є зміни в існуючих - шлемо друге повідомлення
+        if has_changes:
+            changes_msg = build_changes_notification(
+                diff,
+                URL,
+                SUBSCRIBE,
+                date_content or "",
+            )
+            ok = send_notification(changes_msg, img_path)
+            if ok:
+                log_to_buffer("✅ Повідомлення про зміни відправлено")
+            else:
+                log_to_buffer("❌ Помилка надсилання повідомлення про зміни")
 
         # 10. Оновити тільки хеші
         save_state(current_main_hashes, current_span_hashes, timestamp)
