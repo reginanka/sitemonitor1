@@ -187,14 +187,15 @@ def save_state(
     }
     save_json(data, HASH_FILE)
 
-
 def parse_span(span: str) -> Tuple[str, str]:
-    """0000-0030 -> (00:00, 00:30)"""
+    """0000-0030 або 00:00-00:30 -> (00:00, 00:30)"""
     if not span or "-" not in span:
         return ("", "")
     start, end = span.split("-")
+    # Якщо вже є двокрапка, повертаємо як є
+    if ":" in start:
+        return start, end
     return f"{start[:2]}:{start[2:]}", f"{end[:2]}:{end[2:]}"
-
 
 def group_spans(spans_changes: List[Dict]) -> List[Dict]:
     """Групує сусідні інтервали з однаковим типом зміни."""
