@@ -332,7 +332,18 @@ def build_changes_notification(
     update_str: str
 ) -> str:
     """Повідомлення про зміни в ІСНУЮЧИХ датах"""
-    queues = sorted(diff["queues"])
+    
+    # Беремо тільки черги що мають changed_dates
+    queues_with_changes = []
+    for q in sorted(diff["queues"]):
+        info = diff["per_queue"].get(q, {})
+        if info.get("changed_dates"):
+            queues_with_changes.append(q)
+    
+    if not queues_with_changes:
+        return ""
+    
+    queues = queues_with_changes
     
     parts = []
     parts.append(f"Для черг {', '.join(queues)} 🔔 ОНОВЛЕННЯ ГРАФІКА ВІДКЛЮЧЕНЬ!")
@@ -407,6 +418,16 @@ def build_new_schedule_notification(
 ) -> str:
     """Компактне повідомлення про НОВИЙ графік"""
     
+    # Беремо тільки черги що мають нові дати
+    queues_with_new_dates = []
+    for q in sorted(diff["queues"]):
+        info = diff["per_queue"].get(q, {})
+        if info.get("new_dates"):
+            queues_with_new_dates.append(q)
+    
+    if not queues_with_new_dates:
+        return ""
+    
     parts = []
     parts.append("🔔 Додано новий графік на завтра!")
     parts.append("⬇️⬇️⬇️\n")
@@ -430,8 +451,7 @@ def build_new_schedule_notification(
         parts.append(f"🗓 {formatted_date}\n")
         
         # Отримуємо всі черги що мають відключення на цю дату
-        queues_with_outages = []
-        for queue_key in sorted(diff["queues"], key=lambda x: tuple(map(int, x.split(".")))):
+        for queue_key in sorted(queues_with_new_dates, key=lambda x: tuple(map(int, x.split(".")))):
             records = norm_by_queue.get(queue_key, [])
             outages = [r for r in records if r["date"] == date and r["color"] == "red"]
             
@@ -450,11 +470,10 @@ def build_new_schedule_notification(
                     time_ranges.append(f"{start}-{end}")
                 
                 times_str = ", ".join(time_ranges)
-                queues_with_outages.append(f"Черга {queue_key}: ❌{times_str}")
+                parts.append(f"Черга {queue_key}: ❌{times_str}")
+                parts.append("")  # Порожній рядок після КОЖНОЇ черги
         
-        # Додаємо всі черги для цієї дати
-        parts.extend(queues_with_outages)
-        parts.append("")
+        parts.append("")  # Додатковий відступ після всіх черг дати
     
     # Посилання
     parts.append(
@@ -562,11 +581,14 @@ def main():
             changes_msg = build_changes_notification(
                 diff, URL, SUBSCRIBE, date_content or ""
             )
-            ok = send_notification_safe(changes_msg, img_path)
-            if ok:
-                log_to_buffer("✅ Повідомлення про зміни відправлено")
+            if changes_msg:
+                ok = send_notification_safe(changes_msg, img_path)
+                if ok:
+                    log_to_buffer("✅ Повідомлення про зміни відправлено")
+                else:
+                    log_to_buffer("❌ Помилка надсилання повідомлення про зміни")
             else:
-                log_to_buffer("❌ Помилка надсилання повідомлення про зміни")
+                log_to_buffer("⚠️ Немає черг зі змінами для відправки")
         
         # Випадок 2: Є ТІЛЬКИ новий графік (без змін)
         # -> Надсилаємо повідомлення про новий графік + фото
@@ -575,11 +597,14 @@ def main():
             new_msg = build_new_schedule_notification(
                 diff, norm_by_queue, URL, SUBSCRIBE, date_content or ""
             )
-            ok = send_notification_safe(new_msg, img_path)
-            if ok:
-                log_to_buffer("✅ Повідомлення про новий графік відправлено")
+            if new_msg:
+                ok = send_notification_safe(new_msg, img_path)
+                if ok:
+                    log_to_buffer("✅ Повідомлення про новий графік відправлено")
+                else:
+                    log_to_buffer("❌ Помилка надсилання повідомлення про новий графік")
             else:
-                log_to_buffer("❌ Помилка надсилання повідомлення про новий графік")
+                log_to_buffer("⚠️ Немає черг з новими датами для відправки")
         
         # Випадок 3: Є І зміни, І новий графік
         # -> Надсилаємо два повідомлення: 
@@ -590,21 +615,23 @@ def main():
             changes_msg = build_changes_notification(
                 diff, URL, SUBSCRIBE, date_content or ""
             )
-            ok1 = send_notification_safe(changes_msg, img_path)
-            if ok1:
-                log_to_buffer("✅ Повідомлення про зміни відправлено")
-            else:
-                log_to_buffer("❌ Помилка надсилання повідомлення про зміни")
+            if changes_msg:
+                ok1 = send_notification_safe(changes_msg, img_path)
+                if ok1:
+                    log_to_buffer("✅ Повідомлення про зміни відправлено")
+                else:
+                    log_to_buffer("❌ Помилка надсилання повідомлення про зміни")
             
             log_to_buffer("📤 Надсилаю повідомлення про новий графік (без фото)")
             new_msg = build_new_schedule_notification(
                 diff, norm_by_queue, URL, SUBSCRIBE, date_content or ""
             )
-            ok2 = send_notification_safe(new_msg, None)  # БЕЗ фото
-            if ok2:
-                log_to_buffer("✅ Повідомлення про новий графік відправлено")
-            else:
-                log_to_buffer("❌ Помилка надсилання повідомлення про новий графік")
+            if new_msg:
+                ok2 = send_notification_safe(new_msg, None)  # БЕЗ фото
+                if ok2:
+                    log_to_buffer("✅ Повідомлення про новий графік відправлено")
+                else:
+                    log_to_buffer("❌ Помилка надсилання повідомлення про новий графік")
 
         # 10. Оновити тільки хеші
         save_state(current_main_hashes, current_span_hashes, timestamp)
