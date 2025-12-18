@@ -322,21 +322,16 @@ def build_notification_text(diff: Dict, url: str, subscribe: str, update_str: st
     queues = sorted(diff["queues"])
     any_new = False
     any_changed = False
-    lines: List[str] = []
-
+    
+    # Спочатку перевіряємо типи змін
     for q in queues:
         info = diff["per_queue"].get(q, {})
         if info.get("new_dates"):
             any_new = True
         if info.get("changed_dates"):
             any_changed = True
-            for d, ranges in info["changed_dates"].items():
-                for r in ranges:
-                    action = "🪫додали відключення ❌" if r["change"] == "added" else "🔋скасували відключення💡"
-                    lines.append(
-                        f"▶️ Черга {q}:\n {d} {r['start']}-{r['end']} {action}"
-                    )
-
+    
+    # Формуємо заголовок
     if any_changed and any_new:
         title = f"Для черг {', '.join(queues)} 🔔 ОНОВЛЕННЯ ГРАФІКА ВІДКЛЮЧЕНЬ + доданий графік на завтра!"
     elif any_changed:
@@ -345,20 +340,41 @@ def build_notification_text(diff: Dict, url: str, subscribe: str, update_str: st
         title = "🔔Додано новий графік на завтра!"
     else:
         title = ""
-
+    
     parts: List[str] = []
     if title:
         parts.append(title)
-    if lines:
         parts.append("⬇️⬇️⬇️")
-        parts.append("\n".join(lines))
-
-    parts.append(f'<a href="{url}">🔗 Переглянути графік на сайті</a>')
+    
+    # Групуємо зміни по чергах
+    queue_blocks: List[str] = []
+    for q in queues:
+        info = diff["per_queue"].get(q, {})
+        queue_lines: List[str] = []
+        
+        # Додаємо всі зміни для цієї черги
+        for d, ranges in sorted(info.get("changed_dates", {}).items()):
+            for r in ranges:
+                action = "🪫додали відключення ❌" if r["change"] == "added" else "🔋скасували відключення💡"
+                queue_lines.append(f" {d} {r['start']}-{r['end']} {action}")
+        
+        # Якщо є зміни для черги, додаємо блок
+        if queue_lines:
+            queue_block = f"▶️ Черга {q}:\n" + "\n".join(queue_lines)
+            queue_blocks.append(queue_block)
+    
+    if queue_blocks:
+        parts.append("\n\n".join(queue_blocks))
+    
+    parts.append(f'🔗 [Переглянути графік на сайті]({url})')
+    
     if update_str:
         parts.append(update_str)
-    parts.append(f'<a href="{subscribe}">⚡️ ПІДПИСАТИСЯ ⚡️</a>')
-
+    
+    parts.append(f'[⚡️ ПІДПИСАТИСЯ ⚡️]({subscribe})')
+    
     return "\n\n".join(parts)
+
 
 
 def main():
