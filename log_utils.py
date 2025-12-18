@@ -32,7 +32,7 @@ def send_log_to_channel() -> None:
             f"{get_ukraine_time().strftime('%d.%m.%Y %H:%M:%S')} (Київський час)"
         )
         log_body = "\n".join(log_messages)
-        full_text = header + log_body + footer
+        full_text = header + f"<pre>{log_body}</pre>" + footer
         
         url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
         
@@ -60,7 +60,7 @@ def send_log_to_channel() -> None:
                     # Відправляємо поточну частину
                     chunk_text = (
                         f"{header}📋 Частина {part_num}\n\n" +
-                        "\n".join(current_chunk) +
+                        f"<pre>{'\n'.join(current_chunk)}</pre>" +
                         footer
                     )
                     data = {
@@ -82,7 +82,7 @@ def send_log_to_channel() -> None:
             if current_chunk:
                 chunk_text = (
                     f"{header}📋 Частина {part_num}\n\n" +
-                    "\n".join(current_chunk) +
+                    f"<pre>{'\n'.join(current_chunk)}</pre>" +
                     footer
                 )
                 data = {
@@ -93,5 +93,4 @@ def send_log_to_channel() -> None:
                 requests.post(url, data=data, timeout=10)
                 
     except Exception as e:
-        # Логуємо помилку в консоль, але не падаємо
-        print(f"❌ Помилка відправки логу в Telegram: {e}")
+        # Логуємо помилку в консоль,
