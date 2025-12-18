@@ -379,8 +379,8 @@ def build_changes_notification(diff: Dict, url: str, subscribe: str, update_str:
     parts = []
 
     # Заголовок
-    parts.append(f"Для черг {', '.join(queues)} 🔔 ОНОВЛЕННЯ ГРАФІКА ВІДКЛЮЧЕНЬ")
-    parts.append("⬇️⬇️⬇️")
+    parts.append(f"Для черг {', '.join(queues)} 🔔 ОНОВЛЕННЯ ГРАФІКА ВІДКЛЮЧЕНЬ!")
+    parts.append("⬇️⬇️⬇️\n")
 
     # Проходимо по датах у порядку зростання
     for d in sorted(by_date.keys()):
@@ -392,7 +392,7 @@ def build_changes_notification(diff: Dict, url: str, subscribe: str, update_str:
         except ValueError:
             date_str = d
 
-        parts.append(f"🗓{date_str} ")
+        parts.append(f"🗓{date_str} \n")
 
         # Для кожної черги в межах цієї дати
         for q in sorted(by_date[d].keys(), key=lambda x: tuple(map(int, x.split(".")))):
@@ -405,7 +405,7 @@ def build_changes_notification(diff: Dict, url: str, subscribe: str, update_str:
         parts.append("〰️〰️〰️〰️〰️〰️")  # розділювач між датами
 
     # Посилання + підпис
-    parts.append(f'<a href="{url}">🔗 Переглянути графік на сайті</a>')
+    parts.append(f'<a href="{url}">🔗 Переглянути графік на сайті</a>\n')
     if update_str:
         parts.append(update_str)
     parts.append(f'<a href="{subscribe}">⚡️ ПІДПИСАТИСЯ ⚡️</a>')
