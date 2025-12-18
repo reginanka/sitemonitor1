@@ -363,38 +363,55 @@ def build_new_schedule_message(
 
 
 def build_changes_notification(diff: Dict, url: str, subscribe: str, update_str: str) -> str:
-    """Повідомлення про зміни в існуючих графіках"""
     queues = sorted(diff["queues"])
-    parts = []
-    
-    # Заголовок тільки для змін
-    parts.append(f"Для черг {', '.join(queues)} 🔔 ОНОВЛЕННЯ ГРАФІКА ВІДКЛЮЧЕНЬ")
-    parts.append("⬇️⬇️⬇️")
-    
-    queue_blocks = []
+
+    # Побудуємо структуру: date -> queue -> list[ranges]
+    by_date: Dict[str, Dict[str, List[Dict]]] = {}
     for q in queues:
         info = diff["per_queue"].get(q, {})
-        queue_lines = []
-        
-        # Тільки changed_dates (не new_dates)
-        for d, ranges in sorted(info.get("changed_dates", {}).items()):
-            for r in ranges:
+        for d, ranges in info.get("changed_dates", {}).items():
+            if d not in by_date:
+                by_date[d] = {}
+            if q not in by_date[d]:
+                by_date[d][q] = []
+            by_date[d][q].extend(ranges)
+
+    parts = []
+
+    # Заголовок
+    parts.append(f"Для черг {', '.join(queues)} 🔔 ОНОВЛЕННЯ ГРАФІКА ВІДКЛЮЧЕНЬ")
+    parts.append("⬇️⬇️⬇️")
+
+    # Проходимо по датах у порядку зростання
+    for d in sorted(by_date.keys()):
+        # Заголовок дати
+        # d у тебе формат типу 2025-12-18 → перетворимо на 18.12.2025
+        try:
+            dt = datetime.strptime(d, "%Y-%m-%d")
+            date_str = dt.strftime("%d.%m.%Y")
+        except ValueError:
+            date_str = d
+
+        parts.append(f"🗓{date_str} ")
+
+        # Для кожної черги в межах цієї дати
+        for q in sorted(by_date[d].keys(), key=lambda x: tuple(map(int, x.split(".")))):
+            parts.append(f"▶️ Черга {q}:")
+            for r in by_date[d][q]:
                 action = "🪫додали відключення ❌" if r["change"] == "added" else "🔋скасували відключення💡"
-                queue_lines.append(f" {d} {r['start']}-{r['end']} {action}")
-        
-        if queue_lines:
-            queue_block = f"▶️ Черга {q}:\n" + "\n".join(queue_lines)
-            queue_blocks.append(queue_block)
-    
-    if queue_blocks:
-        parts.append("\n\n".join(queue_blocks))
-    
+                parts.append(f"{r['start']}-{r['end']} {action}")
+            parts.append("")  # порожній рядок між чергами
+
+        parts.append("〰️〰️〰️〰️〰️〰️")  # розділювач між датами
+
+    # Посилання + підпис
     parts.append(f'<a href="{url}">🔗 Переглянути графік на сайті</a>')
     if update_str:
         parts.append(update_str)
     parts.append(f'<a href="{subscribe}">⚡️ ПІДПИСАТИСЯ ⚡️</a>')
-    
-    return "\n\n".join(parts)
+
+    return "\n".join(parts)
+
 
 
 def main():
