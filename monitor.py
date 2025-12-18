@@ -401,7 +401,7 @@ def build_changes_notification(
     # Посилання
     parts.append(
         f'<a href="{url}">🔗 Переглянути графік</a> | '
-        f'<a href="{subscribe}">⚡️ ПІДПИСАТИСЯ ⚡️</a>'
+        f'<a href="{subscribe}">⚡️ ПІДПИСАТИСЯ </a>'
     )
     if update_date_str:
         parts.append(update_date_str)
@@ -470,7 +470,7 @@ def build_new_schedule_notification(
                     time_ranges.append(f"{start}-{end}")
                 
                 times_str = ", ".join(time_ranges)
-                parts.append(f"Черга {queue_key}: ❌{times_str}")
+                parts.append(f"Черга {queue_key}: \n❌{times_str}")
                 parts.append("")  # Порожній рядок після КОЖНОЇ черги
         
         parts.append("")  # Додатковий відступ після всіх черг дати
@@ -478,7 +478,7 @@ def build_new_schedule_notification(
     # Посилання
     parts.append(
         f'<a href="{url}">🔗 Переглянути графік</a> | '
-        f'<a href="{subscribe}">⚡️ ПІДПИСАТИСЯ ⚡️</a>'
+        f'<a href="{subscribe}">⚡️ ПІДПИСАТИСЯ </a>'
     )
     if update_date_str:
         parts.append(update_date_str)
