@@ -58,10 +58,11 @@ def send_log_to_channel() -> None:
                 
                 if current_size + line_size > max_chunk_size and current_chunk:
                     # Відправляємо поточну частину
+                    chunk_body = "\n".join(current_chunk)
                     chunk_text = (
-                        f"{header}📋 Частина {part_num}\n\n" +
-                        f"<pre>{'\n'.join(current_chunk)}</pre>" +
-                        footer
+                        f"{header}📋 Частина {part_num}\n\n"
+                        f"<pre>{chunk_body}</pre>"
+                        f"{footer}"
                     )
                     data = {
                         "chat_id": TELEGRAM_LOG_CHANNEL_ID,
@@ -80,10 +81,11 @@ def send_log_to_channel() -> None:
             
             # Відправляємо останню частину
             if current_chunk:
+                chunk_body = "\n".join(current_chunk)
                 chunk_text = (
-                    f"{header}📋 Частина {part_num}\n\n" +
-                    f"<pre>{'\n'.join(current_chunk)}</pre>" +
-                    footer
+                    f"{header}📋 Частина {part_num}\n\n"
+                    f"<pre>{chunk_body}</pre>"
+                    f"{footer}"
                 )
                 data = {
                     "chat_id": TELEGRAM_LOG_CHANNEL_ID,
@@ -93,4 +95,5 @@ def send_log_to_channel() -> None:
                 requests.post(url, data=data, timeout=10)
                 
     except Exception as e:
-        # Логуємо помилку в консоль,
+        # Логуємо помилку в консоль, але не падаємо
+        print(f"❌ Помилка відправки логу в Telegram: {e}")
