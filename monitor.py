@@ -325,23 +325,17 @@ def build_diff(
     return diff
 
 
-def build_unified_notification(
+def build_changes_notification(
     diff: Dict,
-    norm_by_queue: Dict[str, List[Dict]],
     url: str,
     subscribe: str,
     update_str: str
 ) -> str:
-    """Об'єднане повідомлення про нові дати та зміни"""
+    """Повідомлення про зміни в ІСНУЮЧИХ датах"""
     queues = sorted(diff["queues"])
     
     parts = []
-    
-    # Заголовок
-    if diff["new_dates"]:
-        parts.append("🔔 НОВИЙ ГРАФІК ВІДКЛЮЧЕНЬ!")
-    else:
-        parts.append(f"Для черг {', '.join(queues)} 🔔 ОНОВЛЕННЯ ГРАФІКА ВІДКЛЮЧЕНЬ!")
+    parts.append(f"Для черг {', '.join(queues)} 🔔 ОНОВЛЕННЯ ГРАФІКА ВІДКЛЮЧЕНЬ!")
     parts.append("⬇️⬇️⬇️\n")
     
     # Дата оновлення
@@ -352,21 +346,15 @@ def build_unified_notification(
         if match:
             update_date_str = f"🕐 {match.group(1)} {match.group(2)}"
     
-    # Збираємо всі дати разом (нові + змінені)
-    all_dates = set()
-    
-    # Додаємо нові дати
-    for new_date in diff.get("new_dates", []):
-        all_dates.add(new_date)
-    
-    # Додаємо дати зі змінами
+    # Збираємо тільки дати зі ЗМІНАМИ (не нові)
+    dates_with_changes = set()
     for q in queues:
         info = diff["per_queue"].get(q, {})
         for d in info.get("changed_dates", {}).keys():
-            all_dates.add(d)
+            dates_with_changes.add(d)
     
     # Обробляємо кожну дату
-    for date in sorted(all_dates):
+    for date in sorted(dates_with_changes):
         try:
             dt = datetime.strptime(date, "%Y-%m-%d")
             formatted_date = dt.strftime("%d.%m.%Y")
@@ -375,47 +363,25 @@ def build_unified_notification(
         
         parts.append(f"🗓 {formatted_date}\n")
         
-        # Для кожної черги перевіряємо чи є інфо по цій даті
         for queue_key in sorted(queues, key=lambda x: tuple(map(int, x.split(".")))):
             queue_info = diff["per_queue"].get(queue_key, {})
             
-            is_new = date in diff.get("new_dates", [])
-            has_changes = date in queue_info.get("changed_dates", {})
-            
-            if not is_new and not has_changes:
+            if date not in queue_info.get("changed_dates", {}):
                 continue
             
             parts.append(f"▶️ Черга {queue_key}:")
             
-            if is_new:
-                # Для нової дати — показуємо всі відключення
-                records = norm_by_queue.get(queue_key, [])
-                outages = [r for r in records if r["date"] == date and r["color"] == "red"]
+            ranges = queue_info["changed_dates"][date]
+            for r in ranges:
+                start = r['start'].lstrip('0') or '0:00'
+                end = r['end'].lstrip('0') or '0:00'
+                if start.startswith(':'):
+                    start = '0' + start
+                if end.startswith(':'):
+                    end = '0' + end
                 
-                if outages:
-                    grouped = group_spans([{"span": o["span"], "change": "added"} for o in outages])
-                    for g in grouped:
-                        start = g['start'].lstrip('0') or '0:00'
-                        end = g['end'].lstrip('0') or '0:00'
-                        if start.startswith(':'):
-                            start = '0' + start
-                        if end.startswith(':'):
-                            end = '0' + end
-                        parts.append(f"{start}-{end} ❌ відключення")
-            
-            if has_changes:
-                # Для змін — показуємо що додали/скасували
-                ranges = queue_info["changed_dates"][date]
-                for r in ranges:
-                    start = r['start'].lstrip('0') or '0:00'
-                    end = r['end'].lstrip('0') or '0:00'
-                    if start.startswith(':'):
-                        start = '0' + start
-                    if end.startswith(':'):
-                        end = '0' + end
-                    
-                    action = "🪫 додали відключення ❌" if r["change"] == "added" else "🔋 скасували відключення 💡"
-                    parts.append(f"{start}-{end} {action}")
+                action = "🪫 додали відключення ❌" if r["change"] == "added" else "🔋 скасували відключення 💡"
+                parts.append(f"{start}-{end} {action}")
             
             parts.append("")
         
@@ -430,6 +396,96 @@ def build_unified_notification(
         parts.append(update_date_str)
     
     return "\n".join(parts)
+
+
+def build_new_schedule_notification(
+    diff: Dict,
+    norm_by_queue: Dict[str, List[Dict]],
+    url: str,
+    subscribe: str,
+    update_str: str
+) -> str:
+    """Повідомлення про НОВИЙ графік"""
+    queues = sorted(diff["queues"])
+    
+    parts = []
+    parts.append("🔔Додано новий графік на завтра!")
+    parts.append("⬇️⬇️⬇️\n")
+    
+    # Дата оновлення
+    update_date_str = ""
+    if update_str:
+        import re
+        match = re.search(r'(\d{2}:\d{2})\s+(\d{2}\.\d{2})\.\d{4}', update_str)
+        if match:
+            update_date_str = f"🕐 {match.group(1)} {match.group(2)}"
+    
+    # Обробляємо тільки НОВІ дати
+    for date in sorted(diff.get("new_dates", [])):
+        try:
+            dt = datetime.strptime(date, "%Y-%m-%d")
+            formatted_date = dt.strftime("%d.%m.%Y")
+        except ValueError:
+            formatted_date = date
+        
+        parts.append(f"🗓 {formatted_date}\n")
+        
+        for queue_key in sorted(queues, key=lambda x: tuple(map(int, x.split(".")))):
+            records = norm_by_queue.get(queue_key, [])
+            outages = [r for r in records if r["date"] == date and r["color"] == "red"]
+            
+            if not outages:
+                continue
+            
+            parts.append(f"▶️ Черга {queue_key}:")
+            
+            grouped = group_spans([{"span": o["span"], "change": "added"} for o in outages])
+            for g in grouped:
+                start = g['start'].lstrip('0') or '0:00'
+                end = g['end'].lstrip('0') or '0:00'
+                if start.startswith(':'):
+                    start = '0' + start
+                if end.startswith(':'):
+                    end = '0' + end
+                parts.append(f"{start}-{end} ❌ відключення")
+            
+            parts.append("")
+        
+        parts.append("〰️〰️〰️〰️〰️〰️\n")
+    
+    # Посилання
+    parts.append(
+        f'<a href="{url}">🔗 Переглянути графік</a> | '
+        f'<a href="{subscribe}">⚡️ ПІДПИСАТИСЯ ⚡️</a>'
+    )
+    if update_date_str:
+        parts.append(update_date_str)
+    
+    return "\n".join(parts)
+
+
+def send_notification_safe(message: str, img_path=None) -> bool:
+    """Надсилає повідомлення з перевіркою лімітів Telegram"""
+    CAPTION_LIMIT = 1024
+    TEXT_LIMIT = 4096
+    
+    msg_len = len(message)
+    log_to_buffer(f"📝 Довжина повідомлення: {msg_len} символів")
+    
+    # Якщо є фото і текст не влазить в caption
+    if img_path and msg_len > CAPTION_LIMIT:
+        log_to_buffer(f"⚠️ Текст {msg_len} > {CAPTION_LIMIT} (ліміт caption), надсилаю без фото")
+        if msg_len > TEXT_LIMIT:
+            log_to_buffer(f"⚠️ Текст {msg_len} > {TEXT_LIMIT}, обрізаю")
+            message = message[:TEXT_LIMIT-100] + "\n\n... (текст скорочено)"
+        return send_notification(message, None)
+    
+    # Якщо немає фото, але текст завеликий
+    if not img_path and msg_len > TEXT_LIMIT:
+        log_to_buffer(f"⚠️ Текст {msg_len} > {TEXT_LIMIT}, обрізаю")
+        message = message[:TEXT_LIMIT-100] + "\n\n... (текст скорочено)"
+    
+    return send_notification(message, img_path)
 
 
 def main():
@@ -452,7 +508,6 @@ def main():
         log_to_buffer(f"🔐 Витягнено хеші для {len(current_main_hashes)} черг")
 
         # 3. Зберегти поточні нормалізовані дані
-        # Спочатку копіюємо current → previous
         if CURRENT_FILE.exists():
             shutil.copy(CURRENT_FILE, PREVIOUS_FILE)
             log_to_buffer("📋 Попередній current.json скопійовано в previous.json")
@@ -482,25 +537,70 @@ def main():
         if not screenshot_path:
             log_to_buffer("⚠️ Не вдалося створити скріншот")
 
-        # 8. Відправка ОДНОГО об'єднаного повідомлення
         from pathlib import Path as _Path
         img_path = _Path(screenshot_path) if screenshot_path else None
-        
-        unified_msg = build_unified_notification(
-            diff,
-            norm_by_queue,
-            URL,
-            SUBSCRIBE,
-            date_content or ""
-        )
-        
-        ok = send_notification(unified_msg, img_path)
-        if ok:
-            log_to_buffer("✅ Повідомлення відправлено")
-        else:
-            log_to_buffer("❌ Помилка надсилання повідомлення")
 
-        # 9. Оновити тільки хеші
+        # 8. Визначаємо типи змін
+        has_new_dates = bool(diff.get("new_dates"))
+        has_changes = any(
+            q_info.get("changed_dates") 
+            for q_info in diff["per_queue"].values()
+        )
+
+        # 9. Логіка відправки повідомлень з фото
+        
+        # Випадок 1: Є ТІЛЬКИ зміни (без нових дат)
+        # -> Надсилаємо повідомлення про зміни + фото
+        if has_changes and not has_new_dates:
+            log_to_buffer("📤 Надсилаю повідомлення про зміни + фото")
+            changes_msg = build_changes_notification(
+                diff, URL, SUBSCRIBE, date_content or ""
+            )
+            ok = send_notification_safe(changes_msg, img_path)
+            if ok:
+                log_to_buffer("✅ Повідомлення про зміни відправлено")
+            else:
+                log_to_buffer("❌ Помилка надсилання повідомлення про зміни")
+        
+        # Випадок 2: Є ТІЛЬКИ новий графік (без змін)
+        # -> Надсилаємо повідомлення про новий графік + фото
+        elif has_new_dates and not has_changes:
+            log_to_buffer("📤 Надсилаю повідомлення про новий графік + фото")
+            new_msg = build_new_schedule_notification(
+                diff, norm_by_queue, URL, SUBSCRIBE, date_content or ""
+            )
+            ok = send_notification_safe(new_msg, img_path)
+            if ok:
+                log_to_buffer("✅ Повідомлення про новий графік відправлено")
+            else:
+                log_to_buffer("❌ Помилка надсилання повідомлення про новий графік")
+        
+        # Випадок 3: Є І зміни, І новий графік
+        # -> Надсилаємо два повідомлення: 
+        #    1) зміни + фото
+        #    2) новий графік без фото
+        elif has_changes and has_new_dates:
+            log_to_buffer("📤 Надсилаю повідомлення про зміни + фото")
+            changes_msg = build_changes_notification(
+                diff, URL, SUBSCRIBE, date_content or ""
+            )
+            ok1 = send_notification_safe(changes_msg, img_path)
+            if ok1:
+                log_to_buffer("✅ Повідомлення про зміни відправлено")
+            else:
+                log_to_buffer("❌ Помилка надсилання повідомлення про зміни")
+            
+            log_to_buffer("📤 Надсилаю повідомлення про новий графік (без фото)")
+            new_msg = build_new_schedule_notification(
+                diff, norm_by_queue, URL, SUBSCRIBE, date_content or ""
+            )
+            ok2 = send_notification_safe(new_msg, None)  # БЕЗ фото
+            if ok2:
+                log_to_buffer("✅ Повідомлення про новий графік відправлено")
+            else:
+                log_to_buffer("❌ Помилка надсилання повідомлення про новий графік")
+
+        # 10. Оновити тільки хеші
         save_state(current_main_hashes, current_span_hashes, timestamp)
         log_to_buffer("💾 Хеші оновлено в data/last_hash.json")
 
