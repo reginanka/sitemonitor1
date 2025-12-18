@@ -390,11 +390,12 @@ def build_changes_notification(
                     start = '0' + start
                 if end.startswith(':'):
                     end = '0' + end
-                
-                action = "🪫 додали відключення ❌" if r["change"] == "added" else "🔋 скасували відключення 💡"
-                parts.append(f"{start}-{end} {action}")
-            
-            parts.append("")
+                if r["change"] == "added":
+                    action = "🪫 додали відключення ❌"
+                    parts.append(f"{start}-{end} {action}")
+                else:
+                    action = "🔋 скасували відключення 💡"
+                    parts.append(f"<s>{start}-{end}</s> {action}")
         
         parts.append("〰️〰️〰️〰️〰️〰️\n")
     
@@ -450,7 +451,8 @@ def build_new_schedule_notification(
         
         parts.append(f"🗓 {formatted_date}\n")
         
-        # Отримуємо всі черги що мають відключення на цю дату
+        # Збираємо всі черги в список
+        queues_text = []
         for queue_key in sorted(queues_with_new_dates, key=lambda x: tuple(map(int, x.split(".")))):
             records = norm_by_queue.get(queue_key, [])
             outages = [r for r in records if r["date"] == date and r["color"] == "red"]
@@ -470,7 +472,26 @@ def build_new_schedule_notification(
                     time_ranges.append(f"{start}-{end}")
                 
                 times_str = ", ".join(time_ranges)
-                parts.append(f"Черга {queue_key}: \n❌{times_str}")
+                queues_text.append(f"Черга {queue_key}:\n❌{times_str}")
+        
+        # Якщо черг більше 4, показуємо перші 3 + решту в expandable
+        if len(queues_text) > 4:
+            # Перші 3 черги видимі
+            for i in range(3):
+                parts.append(queues_text[i])
+                parts.append("")
+            
+            # Решту ховаємо в expandable blockquote
+            hidden_queues = []
+            for i in range(3, len(queues_text)):
+                hidden_queues.append(queues_text[i])
+            
+            hidden_text = "\n\n".join(hidden_queues)
+            parts.append(f'<blockquote expandable>{hidden_text}</blockquote>')
+        else:
+            # Якщо черг 4 або менше, показуємо все
+            for q_text in queues_text:
+                parts.append(q_text)
                 parts.append("")  # Порожній рядок після КОЖНОЇ черги
         
         parts.append("")  # Додатковий відступ після всіх черг дати
@@ -478,7 +499,7 @@ def build_new_schedule_notification(
     # Посилання
     parts.append(
         f'<a href="{url}">🔗 Переглянути графік</a> | '
-        f'<a href="{subscribe}">⚡️ ПІДПИСАТИСЯ </a>'
+        f'<a href="{subscribe}">⚡️ ПІДПИСАТИСЯ</a>'
     )
     if update_date_str:
         parts.append(update_date_str)
