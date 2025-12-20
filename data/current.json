@@ -6,7 +6,7 @@
       "queue_key": "1.1",
       "date": "20.12.2025",
       "span": "00:00-00:30",
-      "color": "white"
+      "color": "red"
     },
     {
       "cherga": 1,
@@ -14,7 +14,7 @@
       "queue_key": "1.1",
       "date": "20.12.2025",
       "span": "00:30-01:00",
-      "color": "white"
+      "color": "red"
     },
     {
       "cherga": 1,
