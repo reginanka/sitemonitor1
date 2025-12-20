@@ -2,6 +2,7 @@ import os
 import json
 import hashlib
 import shutil
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -260,12 +261,14 @@ def build_diff(
         cur_sh = span_hashes.get(queue_key, {})
         old_sh = last_span.get(queue_key, {})
         
+        new_dates = []
         if not old_sh:
-            # Порожній oldsh = це "перший запуск з даними"
-    newdates = sorted(cursh.keys())  # Всі поточні дати = нові!
-    logtobuffer(f"{queuekey}: new data from empty state!")
-
-        new_dates = sorted(d for d in cur_sh.keys() if d not in old_sh)
+            # Порожній old_sh = це "перший запуск з даними"
+            new_dates = sorted(cur_sh.keys())  # Всі поточні дати = нові!
+            log_to_buffer(f"{queue_key}: new data from empty state!")
+        else:
+            new_dates = sorted(d for d in cur_sh.keys() if d not in old_sh)
+        
         if new_dates:
             log_to_buffer(f" 📅 Нові дати: {new_dates}")
             # Додаємо до глобального списку
@@ -353,7 +356,6 @@ def build_changes_notification(
     # Дата оновлення
     update_date_str = ""
     if update_str:
-        import re
         match = re.search(r'(\d{2}:\d{2})\s+(\d{2}\.\d{2})\.\d{4}', update_str)
         if match:
             update_date_str = f"🕐 {match.group(1)} {match.group(2)}"
@@ -398,7 +400,7 @@ def build_changes_notification(
                     action = "🔋 скасували відключення"
                     parts.append(f"<s>{start}-{end}</s> {action}")
             
-            parts.append("")  # ВИПРАВЛЕННЯ: Порожній рядок після КОЖНОЇ черги
+            parts.append("")  # Порожній рядок після КОЖНОЇ черги
         
         parts.append("======\n")
     
@@ -411,6 +413,7 @@ def build_changes_notification(
         parts.append(update_date_str)
     
     return "\n".join(parts)
+
 
 def build_new_schedule_notification(
     diff: Dict,
@@ -438,7 +441,6 @@ def build_new_schedule_notification(
     # Дата оновлення
     update_date_str = ""
     if update_str:
-        import re
         match = re.search(r'(\d{2}:\d{2})\s+(\d{2}\.\d{2})\.\d{4}', update_str)
         if match:
             update_date_str = f"🕐 {match.group(1)} {match.group(2)}"
@@ -494,7 +496,6 @@ def build_new_schedule_notification(
         parts.append(update_date_str)
 
     return "\n".join(parts)
-
 
 
 def send_notification_safe(message: str, img_path=None) -> bool:
