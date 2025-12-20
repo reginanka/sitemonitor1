@@ -5,546 +5,655 @@ import shutil
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
-
 import requests
-from logutils import logtobuffer, sendlogtochannel
-from sitecontent import getschedulecontent, takescreenshotbetweenelements
-from telegramhandler import sendnotification
+from log_utils import log_to_buffer, send_log_to_channel
+from site_content import get_schedule_content, take_screenshot_between_elements
+from telegram_handler import send_notification
 
-APIBASEURL = os.getenv('APIBASEURL')
+API_BASE_URL = os.getenv("API_BASE_URL")
 URL = os.environ.get('URL')
 SUBSCRIBE = os.environ.get('SUBSCRIBE')
 
-QUEUES = [(i, j) for i in range(1, 7) for j in range(1, 2)][1:]
+QUEUES = [(i, j) for i in range(1, 7) for j in range(1, 2 + 1)]
 
-DATADIR = Path('data')
-DATADIR.mkdir(exist_ok=True)
+DATA_DIR = Path("data")
+DATA_DIR.mkdir(exist_ok=True)
 
-CURRENTFILE = DATADIR / 'current.json'
-PREVIOUSFILE = DATADIR / 'previous.json'
-HASHFILE = DATADIR / 'lasthash.json'
+CURRENT_FILE = DATA_DIR / "current.json"
+PREVIOUS_FILE = DATA_DIR / "previous.json"
+HASH_FILE = DATA_DIR / "last_hash.json"
 
 
-def fetchschedule(chergaid: int, pidchergaid: int) -> Tuple[List[Dict], bool]:
-    """ . , iserror. """
+def fetch_schedule(cherga_id: int, pidcherga_id: int) -> Tuple[List[Dict], bool]:
+    """
+    Тягне графік для однієї черги.
+    Повертає (дані, is_error).
+    """
     resp: Optional[requests.Response] = None
     try:
-        params = {'chergaid': chergaid, 'pidchergaid': pidchergaid}
-        resp = requests.get(APIBASEURL, params=params, timeout=10)
+        params = {"cherga_id": cherga_id, "pidcherga_id": pidcherga_id}
+        resp = requests.get(API_BASE_URL, params=params, timeout=10)
         resp.raise_for_status()
         text = resp.text.strip()
-        
-        if text.startswith('[') and text.endswith(']'):
+        if text.startswith("[") and text.endswith("]"):
             data = json.loads(text)
-        elif text.startswith('{'):
-            text = f'[{text}]'
+        else:
+            if text.startswith("{"):
+                text = f"[{text}]"
             data = json.loads(text)
-            
+
         if isinstance(data, list):
             return data, False
-            
-        logtobuffer(f'{chergaid}.{pidchergaid}')
+
+        log_to_buffer(f"⚠️ Відповідь не список для {cherga_id}.{pidcherga_id}")
         return [], False
-        
+
     except Exception as e:
-        body = resp.text[:200] if resp is not None else ''
-        logtobuffer(f'{chergaid}.{pidchergaid} {e}: {body}')
+        body = resp.text[:200] if resp is not None else ""
+        log_to_buffer(
+            f"❌ Помилка {cherga_id}.{pidcherga_id}: {e}. "
+            f"Фрагмент відповіді: {body}"
+        )
         return [], True
 
 
-def fetchallschedules() -> Tuple[Dict[str, List[Dict]], Dict[str, bool]]:
-    """ . """
-    allschedules: Dict[str, List[Dict]] = {}
-    haserror: Dict[str, bool] = {}
-    
-    logtobuffer('🔄')
-    
-    for chergaid, pidchergaid in QUEUES:
-        queuekey = f'{chergaid}.{pidchergaid}'
-        schedule, iserror = fetchschedule(chergaid, pidchergaid)
-        allschedules[queuekey] = schedule
-        haserror[queuekey] = iserror
-        
-        errornote = '❌ API' if iserror else ''
-        logtobuffer(f'{queuekey}: {len(schedule)} {errornote}')
-    
-    return allschedules, haserror
+def fetch_all_schedules() -> Tuple[Dict[str, List[Dict]], Dict[str, bool]]:
+    """Повертає (дані, словник помилок)."""
+    all_schedules: Dict[str, List[Dict]] = {}
+    has_error: Dict[str, bool] = {}
+
+    log_to_buffer("📡 Завантажую графіки по всіх чергах...")
+    for cherga_id, pidcherga_id in QUEUES:
+        queue_key = f"{cherga_id}.{pidcherga_id}"
+        schedule, is_error = fetch_schedule(cherga_id, pidcherga_id)
+        all_schedules[queue_key] = schedule
+        has_error[queue_key] = is_error
+
+        error_note = " [помилка API]" if is_error else ""
+        log_to_buffer(f" ✓ {queue_key}: {len(schedule)} записів{error_note}")
+
+    return all_schedules, has_error
 
 
-def savejson(data, path: Path) -> None:
+def save_json(data, path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, 'w', encoding='utf-8') as f:
+    with open(path, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
 
-def loadjson(path: Path):
+def load_json(path: Path):
     if not path.exists():
         return {}
     try:
-        with open(path, 'r', encoding='utf-8') as f:
+        with open(path, "r", encoding="utf-8") as f:
             return json.load(f)
     except Exception:
         return {}
 
 
-def calculatehash(obj) -> str:
-    jsonstr = json.dumps(obj, sort_keys=True, ensure_ascii=False)
-    return hashlib.md5(jsonstr.encode('utf-8')).hexdigest()
+def calculate_hash(obj) -> str:
+    json_str = json.dumps(obj, sort_keys=True, ensure_ascii=False)
+    return hashlib.md5(json_str.encode("utf-8")).hexdigest()
 
 
-def normalizerecord(rec: Dict, chergaid: int, pidchergaid: int) -> Dict:
-    date = rec.get('date', '')
-    span = rec.get('span', '')
-    color = rec.get('color', '').strip().lower()
+def normalize_record(rec: Dict, cherga_id: int, pidcherga_id: int) -> Dict:
+    """Нормалізація одного запису."""
+    date = rec.get("date", "")
+    span = rec.get("span", "")
+    color = rec.get("color", "").strip().lower()
+
     return {
-        'cherga': chergaid,
-        'pidcherga': pidchergaid,
-        'queuekey': f'{chergaid}.{pidchergaid}',
-        'date': date,
-        'span': span,
-        'color': color,
+        "cherga": cherga_id,
+        "pidcherga": pidcherga_id,
+        "queue_key": f"{cherga_id}.{pidcherga_id}",
+        "date": date,
+        "span": span,
+        "color": color,
     }
 
 
-def buildstate(rawschedules: Dict[str, List[Dict]], haserror: Dict[str, bool]):
-    """ normbyqueue, mainhashes, spanhashes """
-    normbyqueue: Dict[str, List[Dict]] = {}
-    mainhashes: Dict[str, str] = {}
-    spanhashes: Dict[str, Dict[str, Dict[str, str]]] = {}
-    
-    for queuekey, schedule in rawschedules.items():
-        if haserror.get(queuekey, False):
+def build_state(
+    raw_schedules: Dict[str, List[Dict]],
+    has_error: Dict[str, bool],
+) -> Tuple[
+    Dict[str, List[Dict]], # norm_by_queue
+    Dict[str, str], # main_hashes
+    Dict[str, Dict[str, Dict[str, str]]] # span_hashes[queue][date][span]
+]:
+    """
+    Будує нормалізований стан з хешами по інтервалах.
+    """
+    norm_by_queue: Dict[str, List[Dict]] = {}
+    main_hashes: Dict[str, str] = {}
+    span_hashes: Dict[str, Dict[str, Dict[str, str]]] = {}
+
+    for queue_key, schedule in raw_schedules.items():
+        if has_error.get(queue_key, False):
             continue
-            
-        chergaid, pidchergaid = map(int, queuekey.split('.'))
-        normlist: List[Dict] = []
-        
+
+        cherga_id, pidcherga_id = map(int, queue_key.split("."))
+        norm_list: List[Dict] = []
+
         for rec in schedule:
-            nrec = normalizerecord(rec, chergaid, pidchergaid)
-            normlist.append(nrec)
-        
-        normlist.sort(key=lambda r: (r['date'], r['span']))
-        normbyqueue[queuekey] = normlist
-        
-        # mainhashdata = [{'date': r['date'], 'span': r['span'], 'color': r['color']} for r in normlist]
-        mainhashdata = [[r['date'], r['span'], r['color']] for r in normlist]
-        mainhashes[queuekey] = calculatehash(mainhashdata)
-        
-        # sh: Dict[str, Dict[str, str]] = {}
+            nrec = normalize_record(rec, cherga_id, pidcherga_id)
+            norm_list.append(nrec)
+
+        norm_list.sort(key=lambda r: (r["date"], r["span"]))
+        norm_by_queue[queue_key] = norm_list
+
+        # Головний хеш черги — від color кожного інтервалу
+        main_hash_data = [{"date": r["date"], "span": r["span"], "color": r["color"]} for r in norm_list]
+        main_hashes[queue_key] = calculate_hash(main_hash_data)
+
+        # Хеші по кожному інтервалу
         sh: Dict[str, Dict[str, str]] = {}
-        for rec in normlist:
-            d = rec['date']
-            span = rec['span']
+        for rec in norm_list:
+            d = rec["date"]
+            span = rec["span"]
             if d not in sh:
                 sh[d] = {}
-            sh[d][span] = calculatehash(color=rec['color'])
+            sh[d][span] = calculate_hash({"color": rec["color"]})
         
-        spanhashes[queuekey] = sh
+        span_hashes[queue_key] = sh
+
+    return norm_by_queue, main_hashes, span_hashes
+
+
+def load_last_state():
+    """Завантажує хеші з last_hash.json + дані з previous.json"""
+    hash_data = load_json(HASH_FILE)
+    prev_norm = load_json(PREVIOUS_FILE)
     
-    return normbyqueue, mainhashes, spanhashes
-
-
-def loadlaststate():
-    """ lasthash.json + previous.json """
-    hashdata = loadjson(HASHFILE)
-    prevnorm = loadjson(PREVIOUSFILE)
-    return (
-        hashdata.get('timestamp'),
-        hashdata.get('mainhashes', {}),
-        hashdata.get('spanhashes', {}),
-        prevnorm,
-    )
-
-
-def savestate(mainhashes: Dict[str, str], spanhashes: Dict[str, Dict[str, Dict[str, str]]], timestamp: str) -> None:
-    """ lasthash.json """
-    data = {
-        'timestamp': timestamp,
-        'mainhashes': mainhashes,
-        'spanhashes': spanhashes,
+    return {
+        "timestamp": hash_data.get("timestamp"),
+        "main_hashes": hash_data.get("main_hashes", {}),
+        "span_hashes": hash_data.get("span_hashes", {}),
+        "norm_by_queue": prev_norm,
     }
-    savejson(data, HASHFILE)
 
 
-def parsespan(span: str) -> Tuple[str, str]:
-    """ 00:00-00:30 → 00:00, 00:30 """
-    if not span or '-' not in span:
-        return '', ''
-    
-    start, end = span.split('-')
-    if ':' in start:
+def save_state(
+    main_hashes: Dict[str, str],
+    span_hashes: Dict[str, Dict[str, Dict[str, str]]],
+    timestamp: str
+) -> None:
+    """Зберігає тільки хеші в last_hash.json"""
+    data = {
+        "timestamp": timestamp,
+        "main_hashes": main_hashes,
+        "span_hashes": span_hashes,
+    }
+    save_json(data, HASH_FILE)
+
+
+def parse_span(span: str) -> Tuple[str, str]:
+    """0000-0030 або 00:00-00:30 -> (00:00, 00:30)"""
+    if not span or "-" not in span:
+        return ("", "")
+    start, end = span.split("-")
+    # Якщо вже є двокрапка, повертаємо як є
+    if ":" in start:
         return start, end
-    return f'{start.zfill(2)}:00', f'{end.zfill(2)}:00'
+    return f"{start[:2]}:{start[2:]}", f"{end[:2]}:{end[2:]}"
 
 
-def groupspans(spanschanges: List[Dict]) -> List[Dict]:
-    """ """
+def group_spans(spans_changes: List[Dict]) -> List[Dict]:
+    """Групує сусідні інтервали з однаковим типом зміни."""
     result: List[Dict] = []
     current: Optional[Dict] = None
-    
-    for item in sorted(spanschanges, key=lambda x: x['span']):
-        starttime, endtime = parsespan(item['span'])
+
+    for item in sorted(spans_changes, key=lambda x: x["span"]):
+        start_time, end_time = parse_span(item["span"])
+
         if not current:
-            current = {'start': starttime, 'end': endtime, 'change': item['change']}
-        elif (current['change'] == item['change'] and current['end'] == starttime):
-            current['end'] = endtime
+            current = {
+                "start": start_time,
+                "end": end_time,
+                "change": item["change"],
+            }
         else:
-            result.append(current)
-            current = {'start': starttime, 'end': endtime, 'change': item['change']}
-    
+            if current["change"] == item["change"] and current["end"] == start_time:
+                current["end"] = end_time
+            else:
+                result.append(current)
+                current = {
+                    "start": start_time,
+                    "end": end_time,
+                    "change": item["change"],
+                }
+
     if current:
         result.append(current)
-    
+
     return result
 
 
-def builddiff(normbyqueue: Dict[str, List[Dict]], mainhashes: Dict[str, str], 
-              spanhashes: Dict[str, Dict[str, Dict[str, str]]], laststate: Dict) -> Dict:
-    """ """
-    lastmain = laststate.get('mainhashes', {})
-    lastspan = laststate.get('spanhashes', {})
-    lastnorm = laststate.get('normbyqueue', {})
-    
+def build_diff(
+    norm_by_queue: Dict[str, List[Dict]],
+    main_hashes: Dict[str, str],
+    span_hashes: Dict[str, Dict[str, Dict[str, str]]],
+    last_state: Dict,
+) -> Dict:
+    last_main = last_state.get("main_hashes", {})
+    last_span = last_state.get("span_hashes", {})
+    last_norm = last_state.get("norm_by_queue", {})
+
     diff = {
-        'queues': [],
-        'perqueue': {},
-        'newdates': [],
+        "queues": [],
+        "per_queue": {},
+        "new_dates": [],  # Глобальний список нових дат
     }
-    
-    for queuekey, curmainhash in mainhashes.items():
-        oldmainhash = lastmain.get(queuekey)
-        if oldmainhash is None:
-            logtobuffer(f'{queuekey}: skip (no previous hash)')
+
+    for queue_key, cur_main_hash in main_hashes.items():
+        old_main_hash = last_main.get(queue_key)
+        
+        if old_main_hash is None:
+            log_to_buffer(f"ℹ️ Перший запуск для {queue_key}, пропускаємо")
             continue
         
-        if oldmainhash == curmainhash:
+        if old_main_hash == cur_main_hash:
             continue
+
+        # Є зміни — шукаємо деталі
+        log_to_buffer(f"🔍 Аналізую зміни для {queue_key}")
+
+        cur_sh = span_hashes.get(queue_key, {})
+        old_sh = last_span.get(queue_key, {})
         
-        logtobuffer(f'{queuekey}: mainhash changed')
+        if not old_sh:
+            # Порожній oldsh = це "перший запуск з даними"
+    newdates = sorted(cursh.keys())  # Всі поточні дати = нові!
+    logtobuffer(f"{queuekey}: new data from empty state!")
+
+        new_dates = sorted(d for d in cur_sh.keys() if d not in old_sh)
+        if new_dates:
+            log_to_buffer(f" 📅 Нові дати: {new_dates}")
+            # Додаємо до глобального списку
+            for nd in new_dates:
+                if nd not in diff["new_dates"]:
+                    diff["new_dates"].append(nd)
         
-        cursh = spanhashes.get(queuekey, {})
-        oldsh = lastspan.get(queuekey, {})
-        
-        # 🔥 ФІКС: обробка переходу з порожньої черги
-        if not oldsh:
-            newdates = sorted(cursh.keys())
-            logtobuffer(f'{queuekey}: new data from empty state! {newdates}')
-        else:
-            newdates = sorted(d for d in cursh if d not in oldsh)
-            logtobuffer(f'{queuekey}: cursh={spanhashes.get(queuekey)}, oldsh={lastspan.get(queuekey)}')
-        
-        if newdates:
-            logtobuffer(f'{queuekey}: newdates {newdates}')
-            if newdates[0] not in diff['newdates']:
-                diff['newdates'].append(newdates[0])
-        
-        changeddates = {}
-        curitems = normbyqueue.get(queuekey, [])
-        olditemslist = lastnorm.get(queuekey, [])
-        
-        for d in cursh.keys():
-            if d in newdates:
+        changed_dates = {}
+        cur_items = norm_by_queue.get(queue_key, [])
+        old_items_list = last_norm.get(queue_key, [])
+
+        for d in cur_sh.keys():
+            if d in new_dates:
                 continue
             
-            curspans = cursh.get(d, {})
-            oldspans = oldsh.get(d, {})
-            changesfordate = []
+            # Порівнюємо хеші інтервалів для цієї дати
+            cur_spans = cur_sh.get(d, {})
+            old_spans = old_sh.get(d, {})
             
-            for span, curspanhash in curspans.items():
-                oldspanhash = oldspans.get(span)
-                if oldspanhash == curspanhash:
+            changes_for_date = []
+            
+            for span, cur_span_hash in cur_spans.items():
+                old_span_hash = old_spans.get(span)
+                if old_span_hash == cur_span_hash:
                     continue
                 
-                logtobuffer(f'  {span} {d}')
+                # Хеш інтервалу змінився
+                log_to_buffer(f" 🔄 Інтервал {span} дата {d}: хеш змінився")
                 
-                newrec = next((r for r in curitems if r['date'] == d and r['span'] == span), None)
-                oldrec = next((r for r in olditemslist if r['date'] == d and r['span'] == span), None)
+                # Знаходимо старий і новий запис
+                new_rec = next((r for r in cur_items if r["date"] == d and r["span"] == span), None)
+                old_rec = next((r for r in old_items_list if r["date"] == d and r["span"] == span), None)
                 
-                if newrec and oldrec:
-                    logtobuffer(f'    color={oldrec["color"]} → {newrec["color"]}')
-                    if newrec['color'] != oldrec['color']:
-                        change = 'added' if newrec['color'] == 'red' else 'removed'
-                        changesfordate.append({'span': span, 'change': change})
-                        logtobuffer(f'    {change}')
+                if new_rec and old_rec:
+                    log_to_buffer(f" Старий: color={old_rec['color']}, Новий: color={new_rec['color']}")
+                    if new_rec["color"] != old_rec["color"]:
+                        change = "added" if new_rec["color"] == "red" else "removed"
+                        changes_for_date.append({"span": span, "change": change})
+                        log_to_buffer(f" ✅ Зміна: {change}")
                 else:
-                    logtobuffer(f'    newrec={bool(newrec)}, oldrec={bool(oldrec)}')
-            
-            if changesfordate:
-                grouped = groupspans(changesfordate)
-                changeddates[d] = grouped
-                logtobuffer(f'{d}: {len(changesfordate)} → {len(grouped)} groups')
-        
-        if newdates or changeddates:
-            diff['queues'].append(queuekey)
-            diff['perqueue'][queuekey] = {'newdates': newdates, 'changeddates': changeddates}
-            logtobuffer(f'{queuekey} → diff')
+                    log_to_buffer(f" ⚠️ Не знайдено запис: new_rec={bool(new_rec)}, old_rec={bool(old_rec)}")
+
+            if changes_for_date:
+                grouped = group_spans(changes_for_date)
+                changed_dates[d] = grouped
+                log_to_buffer(f" ✅ Для дати {d} знайдено {len(changes_for_date)} змін")
+
+        if new_dates or changed_dates:
+            diff["queues"].append(queue_key)
+            diff["per_queue"][queue_key] = {
+                "new_dates": new_dates,
+                "changed_dates": changed_dates,
+            }
+            log_to_buffer(f"✅ Додано {queue_key} до diff")
         else:
-            logtobuffer(f'{queuekey}: no actionable changes')
-    
+            log_to_buffer(f"⚠️ Хеш змінився для {queue_key}, але конкретні зміни не виявлені")
+
     return diff
 
 
-def buildchangesnotification(diff: Dict, url: str, subscribe: str, updatestr: str) -> str:
-    """ """
-    queueswithchanges = []
-    for q in sorted(diff['queues']):
-        info = diff['perqueue'].get(q, {})
-        if info.get('changeddates'):
-            queueswithchanges.append(q)
+def build_changes_notification(
+    diff: Dict,
+    url: str,
+    subscribe: str,
+    update_str: str
+) -> str:
+    """Повідомлення про зміни в ІСНУЮЧИХ датах"""
     
-    if not queueswithchanges:
-        return ''
+    # Беремо тільки черги що мають changed_dates
+    queues_with_changes = []
+    for q in sorted(diff["queues"]):
+        info = diff["per_queue"].get(q, {})
+        if info.get("changed_dates"):
+            queues_with_changes.append(q)
     
-    queues = ', '.join(queueswithchanges)
+    if not queues_with_changes:
+        return ""
+    
+    queues = queues_with_changes
+    
     parts = []
-    parts.append(f'🔄 {queues}!')
-    parts.append('📅 changeddates...')
+    parts.append(f"Для черг {', '.join(queues)} 🔔 ОНОВЛЕННЯ ГРАФІКА ВІДКЛЮЧЕНЬ!")
+    parts.append("⬇️⬇️⬇️\n")
     
-    updatedatestr = ''
-    if updatestr:
+    # Дата оновлення
+    update_date_str = ""
+    if update_str:
         import re
-        match = re.search(r'22\.2\.4', updatestr)
+        match = re.search(r'(\d{2}:\d{2})\s+(\d{2}\.\d{2})\.\d{4}', update_str)
         if match:
-            updatedatestr = f' ({match.group(1)}-{match.group(2)})'
+            update_date_str = f"🕐 {match.group(1)} {match.group(2)}"
     
-    dateswithchanges = set()
+    # Збираємо тільки дати зі ЗМІНАМИ (не нові)
+    dates_with_changes = set()
     for q in queues:
-        info = diff['perqueue'].get(q, {})
-        for d in info.get('changeddates', {}).keys():
-            dateswithchanges.add(d)
+        info = diff["per_queue"].get(q, {})
+        for d in info.get("changed_dates", {}).keys():
+            dates_with_changes.add(d)
     
-    for date in sorted(dateswithchanges):
+    # Обробляємо кожну дату
+    for date in sorted(dates_with_changes):
         try:
-            dt = datetime.strptime(date, '%Y-%m-%d')
-            formatteddate = dt.strftime('%d.%m.%Y')
+            dt = datetime.strptime(date, "%Y-%m-%d")
+            formatted_date = dt.strftime("%d.%m.%Y")
         except ValueError:
-            formatteddate = date
+            formatted_date = date
         
-        parts.append(f'📅 {formatteddate}')
+        parts.append(f"🗓 {formatted_date}\n")
         
-        for queuekey in sorted(queues, key=lambda x: tuple(map(int, x.split('.')))):
-            queueinfo = diff['perqueue'].get(queuekey, {})
-            if date not in queueinfo.get('changeddates', {}):
+        for queue_key in sorted(queues, key=lambda x: tuple(map(int, x.split(".")))):
+            queue_info = diff["per_queue"].get(queue_key, {})
+            
+            if date not in queue_info.get("changed_dates", {}):
                 continue
             
-            ranges = queueinfo['changeddates'][date]
+            parts.append(f"▶️ Черга {queue_key}:")
+            
+            ranges = queue_info["changed_dates"][date]
             for r in ranges:
-                start = r['start'].lstrip('0') or '00:00'
-                end = r['end'].lstrip('0') or '00:00'
+                start = r['start'].lstrip('0') or '0:00'
+                end = r['end'].lstrip('0') or '0:00'
                 if start.startswith(':'):
                     start = '0' + start
                 if end.startswith(':'):
                     end = '0' + end
-                
-                if r['change'] == 'added':
-                    action = '🟥'
-                    parts.append(f'{queuekey}: {start}-{end} {action}')
+                if r["change"] == "added":
+                    action = "🪫 додали відключення"
+                    parts.append(f"{start}-{end} {action}")
                 else:
-                    action = '🟢'
-                    parts.append(f'{queuekey}: {start}-{end}s {action}')
-    
-    parts.append('')
-    parts.append(f'🔗 <a href="{url}">🔗</a> | <a href="{subscribe}">📱</a>')
-    
-    if updatedatestr:
-        parts.append(updatedatestr)
-    
-    return '\n'.join(parts)
-
-
-def buildnewschedulenotification(diff: Dict, normbyqueue: Dict[str, List[Dict]], url: str, subscribe: str, updatestr: str) -> str:
-    """ """
-    queueswithnewdates = []
-    for q in sorted(diff['queues']):
-        info = diff['perqueue'].get(q, {})
-        if info.get('newdates'):
-            queueswithnewdates.append(q)
-    
-    if not queueswithnewdates:
-        return ''
-    
-    parts = []
-    parts.append('🆕 !')
-    parts.append('📅 newdates...')
-    
-    updatedatestr = ''
-    if updatestr:
-        import re
-        match = re.search(r'22\.2\.4', updatestr)
-        if match:
-            updatedatestr = f' ({match.group(1)}-{match.group(2)})'
-    
-    for date in sorted(diff.get('newdates', [])):
-        try:
-            dt = datetime.strptime(date, '%Y-%m-%d')
-            formatteddate = dt.strftime('%d.%m.%Y')
-        except ValueError:
-            formatteddate = date
-        
-        parts.append(f'📅 {formatteddate}')
-        
-        for queuekey in sorted(queueswithnewdates, key=lambda x: tuple(map(int, x.split('.')))):
-            records = normbyqueue.get(queuekey, [])
-            outages = [r for r in records if r['date'] == date and r['color'] == 'red']
+                    action = "🔋 скасували відключення"
+                    parts.append(f"<s>{start}-{end}</s> {action}")
             
+            parts.append("")  # ВИПРАВЛЕННЯ: Порожній рядок після КОЖНОЇ черги
+        
+        parts.append("======\n")
+    
+    # Посилання
+    parts.append(
+        f'<a href="{url}">🔗 Сайт "ЖОЕ"</a> | '
+        f'<a href="{subscribe}">⚡️ ПІДПИСАТИСЯ</a>'
+    )
+    if update_date_str:
+        parts.append(update_date_str)
+    
+    return "\n".join(parts)
+
+def build_new_schedule_notification(
+    diff: Dict,
+    norm_by_queue: Dict[str, List[Dict]],
+    url: str,
+    subscribe: str,
+    update_str: str
+) -> str:
+    """Компактне повідомлення про НОВИЙ графік"""
+
+    # Беремо тільки черги що мають нові дати
+    queues_with_new_dates = []
+    for q in sorted(diff["queues"]):
+        info = diff["per_queue"].get(q, {})
+        if info.get("new_dates"):
+            queues_with_new_dates.append(q)
+
+    if not queues_with_new_dates:
+        return ""
+
+    parts = []
+    parts.append("🔔 Додано новий графік!")
+    parts.append("⬇️⬇️⬇️\n")
+
+    # Дата оновлення
+    update_date_str = ""
+    if update_str:
+        import re
+        match = re.search(r'(\d{2}:\d{2})\s+(\d{2}\.\d{2})\.\d{4}', update_str)
+        if match:
+            update_date_str = f"🕐 {match.group(1)} {match.group(2)}"
+
+    # Обробляємо тільки НОВІ дати
+    for date in sorted(diff.get("new_dates", [])):
+        try:
+            dt = datetime.strptime(date, "%Y-%m-%d")
+            formatted_date = dt.strftime("%d.%m.%Y")
+        except ValueError:
+            formatted_date = date
+
+        parts.append(f"🗓 {formatted_date}\n")
+
+        # Отримуємо всі черги що мають відключення на цю дату
+        for queue_key in sorted(
+            queues_with_new_dates, key=lambda x: tuple(map(int, x.split(".")))
+        ):
+            records = norm_by_queue.get(queue_key, [])
+            outages = [
+                r for r in records
+                if r["date"] == date and r["color"] == "red"
+            ]
+
             if outages:
-                grouped = groupspans([{'span': o['span'], 'change': 'added'} for o in outages])
-                
-                timeranges = []
+                grouped = group_spans(
+                    [{"span": o["span"], "change": "added"} for o in outages]
+                )
+
+                # Форматуємо часи компактно
+                time_ranges = []
                 for g in grouped:
-                    start = g['start'].lstrip('0') or '00:00'
-                    end = g['end'].lstrip('0') or '00:00'
-                    if start.startswith(':'):
-                        start = '0' + start
-                    if end.startswith(':'):
-                        end = '0' + end
-                    timeranges.append(f'{start}-{end}')
-                
-                timesstr = ', '.join(timeranges)
-                parts.append(f'{queuekey}: {timesstr}')
-    
-    parts.append('')
-    parts.append(f'🔗 <a href="{url}">🔗</a> | <a href="{subscribe}">📱</a>')
-    
-    if updatedatestr:
-        parts.append(updatedatestr)
-    
-    return '\n'.join(parts)
+                    start = g["start"].lstrip("0") or "0:00"
+                    end = g["end"].lstrip("0") or "0:00"
+                    if start.startswith(":"):
+                        start = "0" + start
+                    if end.startswith(":"):
+                        end = "0" + end
+                    time_ranges.append(f"{start}-{end}")
+
+                times_str = ", ".join(time_ranges)
+                parts.append(f"Черга {queue_key}: \n🪫{times_str}")
+                parts.append("")  # Порожній рядок після КОЖНОЇ черги
+
+        parts.append("")  # Додатковий відступ після всіх черг дати
+
+    # Посилання
+    parts.append(
+        f'<a href="{url}">🔗 Сайт "ЖОЕ"</a> | '
+        f'<a href="{subscribe}">⚡️ ПІДПИСАТИСЯ </a>'
+    )
+    if update_date_str:
+        parts.append(update_date_str)
+
+    return "\n".join(parts)
 
 
-def sendnotificationsafe(message: str, imgpath: Optional[str] = None) -> bool:
-    """ Telegram """
-    CAPTIONLIMIT = 1024
-    TEXTLIMIT = 4096
+
+def send_notification_safe(message: str, img_path=None) -> bool:
+    """Надсилає повідомлення з перевіркою лімітів Telegram"""
+    CAPTION_LIMIT = 1024  # Ліміт для caption з фото
+    TEXT_LIMIT = 4096     # Ліміт для звичайного text повідомлення
     
-    msglen = len(message)
-    logtobuffer(f'msglen={msglen}')
+    msg_len = len(message)
+    log_to_buffer(f"📝 Довжина повідомлення: {msg_len} символів")
     
-    if imgpath and msglen > CAPTIONLIMIT:
-        logtobuffer(f'msglen>{CAPTIONLIMIT} caption, +{imgpath}')
-        caption = message[:CAPTIONLIMIT-100] + '...'
-        return sendnotification(caption, imgpath)
+    # Якщо є фото і текст не влазить в caption
+    if img_path and msg_len > CAPTION_LIMIT:
+        log_to_buffer(f"⚠️ Текст {msg_len} > {CAPTION_LIMIT} (ліміт caption), надсилаю спочатку фото, потім текст")
+        # Спочатку надсилаємо фото без тексту
+        send_notification("📸", img_path)
+        # Потім надсилаємо текст окремим повідомленням
+        if msg_len > TEXT_LIMIT:
+            log_to_buffer(f"⚠️ Текст {msg_len} > {TEXT_LIMIT}, обрізаю")
+            message = message[:TEXT_LIMIT-100] + "\n\n... (текст скорочено)"
+        return send_notification(message, None)
     
-    if msglen > TEXTLIMIT:
-        logtobuffer(f'msglen>{TEXTLIMIT}, truncate')
-        message = message[:TEXTLIMIT-100] + '...'
-        return sendnotification(message, None)
+    # Якщо немає фото, але текст завеликий для text повідомлення
+    if not img_path and msg_len > TEXT_LIMIT:
+        log_to_buffer(f"⚠️ Текст {msg_len} > {TEXT_LIMIT}, обрізаю")
+        message = message[:TEXT_LIMIT-100] + "\n\n... (текст скорочено)"
     
-    if not imgpath and msglen > TEXTLIMIT:
-        logtobuffer(f'msglen>{TEXTLIMIT}, truncate')
-        message = message[:TEXTLIMIT-100] + '...'
-        return sendnotification(message, imgpath)
-    
-    return sendnotification(message, imgpath)
+    return send_notification(message, img_path)
 
 
 def main():
-    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    logtobuffer('=' * 60)
-    logtobuffer(f'[{timestamp}]')
-    logtobuffer('=' * 60)
-    
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    log_to_buffer("=" * 60)
+    log_to_buffer(f"🚀 СТАРТ [{timestamp}]")
+    log_to_buffer("=" * 60)
+
     try:
-        # 1. API
-        currentschedules, haserror = fetchallschedules()
-        if not currentschedules:
-            logtobuffer('return (1. API empty)')
+        # 1. Завантажити графіки з API
+        current_schedules, has_error = fetch_all_schedules()
+        if not current_schedules:
+            log_to_buffer("❌ Не вдалось завантажити жоден графік")
             return
+
+        # 2. Побудувати поточний стан
+        norm_by_queue, current_main_hashes, current_span_hashes = build_state(
+            current_schedules, has_error
+        )
+        log_to_buffer(f"🔐 Витягнено хеші для {len(current_main_hashes)} черг")
+
+        # 3. Зберегти поточні нормалізовані дані
+        if CURRENT_FILE.exists():
+            shutil.copy(CURRENT_FILE, PREVIOUS_FILE)
+            log_to_buffer("📋 Попередній current.json скопійовано в previous.json")
         
-        # 2. 
-        normbyqueue, currentmainhashes, currentspanhashes = buildstate(currentschedules, haserror)
-        logtobuffer(f'len(currentmainhashes)={len(currentmainhashes)}')
-        
-        # 3. current.json → previous.json
-        if CURRENTFILE.exists():
-            shutil.copy(CURRENTFILE, PREVIOUSFILE)
-            logtobuffer('current.json → previous.json')
-        savejson(normbyqueue, CURRENTFILE)
-        logtobuffer('data→current.json')
-        
-        # 4. lasthash.json
-        laststate = loadlaststate()
-        logtobuffer('lasthash.json')
-        
-        # 5. diff
-        diff = builddiff(normbyqueue, currentmainhashes, currentspanhashes, laststate)
-        if not diff.get('queues') and not diff.get('newdates'):
-            logtobuffer('no changes')
-            savestate(currentmainhashes, currentspanhashes, timestamp)
+        save_json(norm_by_queue, CURRENT_FILE)
+        log_to_buffer("💾 Нормалізовані дані збережено в data/current.json")
+
+        # 4. Завантажити попередній стан
+        last_state = load_last_state()
+        log_to_buffer("📋 Завантажено попередній стан")
+
+        # 5. Побудувати diff
+        diff = build_diff(norm_by_queue, current_main_hashes, current_span_hashes, last_state)
+
+        if not diff["queues"] and not diff["new_dates"]:
+            log_to_buffer("✅ Дані по всіх чергах не змінилися")
+            save_state(current_main_hashes, current_span_hashes, timestamp)
             return
+
+        log_to_buffer(f"🔔 Зміни виявлено для: {', '.join(diff['queues'])}")
+
+        # 6. Отримати дату оновлення з сайту
+        _, date_content = get_schedule_content()
+
+        # 7. Скріншот із сайту
+        screenshot_path, screenshot_hash = take_screenshot_between_elements()
+        if not screenshot_path:
+            log_to_buffer("⚠️ Не вдалося створити скріншот")
+
+        from pathlib import Path as _Path
+        img_path = _Path(screenshot_path) if screenshot_path else None
+
+        # 8. Визначаємо типи змін
+        has_new_dates = bool(diff.get("new_dates"))
+        has_changes = any(
+            q_info.get("changed_dates") 
+            for q_info in diff["per_queue"].values()
+        )
+
+        # 9. Логіка відправки повідомлень з фото
         
-        logtobuffer(f'diff: {", ".join(diff.get("queues", []))}')
-        
-        # 6. 
-        datecontent = getschedulecontent()
-        logtobuffer('datecontent')
-        
-        # 7. 
-        screenshotpath, screenshothash = takescreenshotbetweenelements()
-        if not screenshotpath:
-            logtobuffer('no screenshot')
-        from pathlib import Path as Path
-        imgpath = Path(screenshotpath) if screenshotpath else None
-        logtobuffer(f'imgpath={imgpath}')
-        
-        # 8. 
-        hasnewdates = bool(diff.get('newdates'))
-        haschanges = any(qinfo.get('changeddates') for qinfo in diff.get('perqueue', {}).values())
-        logtobuffer(f'hasnewdates={hasnewdates}, haschanges={haschanges}')
-        
-        if haschanges and not hasnewdates:
-            logtobuffer('changes only')
-            changesmsg = buildchangesnotification(diff, URL, SUBSCRIBE, datecontent or '')
-            if changesmsg:
-                ok = sendnotificationsafe(changesmsg, imgpath)
+        # Випадок 1: Є ТІЛЬКИ зміни (без нових дат)
+        # -> Надсилаємо повідомлення про зміни + фото
+        if has_changes and not has_new_dates:
+            log_to_buffer("📤 Надсилаю повідомлення про зміни + фото")
+            changes_msg = build_changes_notification(
+                diff, URL, SUBSCRIBE, date_content or ""
+            )
+            if changes_msg:
+                ok = send_notification_safe(changes_msg, img_path)
                 if ok:
-                    logtobuffer('✅ changes sent')
+                    log_to_buffer("✅ Повідомлення про зміни відправлено")
                 else:
-                    logtobuffer('❌ changes failed')
+                    log_to_buffer("❌ Помилка надсилання повідомлення про зміни")
             else:
-                logtobuffer('no changesmsg')
-                
-        elif hasnewdates and not haschanges:
-            logtobuffer('newdates only')
-            newmsg = buildnewschedulenotification(diff, normbyqueue, URL, SUBSCRIBE, datecontent or '')
-            if newmsg:
-                ok = sendnotificationsafe(newmsg, imgpath)
+                log_to_buffer("⚠️ Немає черг зі змінами для відправки")
+        
+        # Випадок 2: Є ТІЛЬКИ новий графік (без змін)
+        # -> Надсилаємо повідомлення про новий графік + фото
+        elif has_new_dates and not has_changes:
+            log_to_buffer("📤 Надсилаю повідомлення про новий графік + фото")
+            new_msg = build_new_schedule_notification(
+                diff, norm_by_queue, URL, SUBSCRIBE, date_content or ""
+            )
+            if new_msg:
+                ok = send_notification_safe(new_msg, img_path)
                 if ok:
-                    logtobuffer('✅ newdates sent')
+                    log_to_buffer("✅ Повідомлення про новий графік відправлено")
                 else:
-                    logtobuffer('❌ newdates failed')
+                    log_to_buffer("❌ Помилка надсилання повідомлення про новий графік")
             else:
-                logtobuffer('no newmsg')
-                
-        elif haschanges and hasnewdates:
-            logtobuffer('both')
-            changesmsg = buildchangesnotification(diff, URL, SUBSCRIBE, datecontent or '')
-            if changesmsg:
-                ok1 = sendnotificationsafe(changesmsg, imgpath)
+                log_to_buffer("⚠️ Немає черг з новими датами для відправки")
+        
+        # Випадок 3: Є І зміни, І новий графік
+        # -> Надсилаємо два повідомлення: 
+        #    1) зміни + фото
+        #    2) новий графік без фото
+        elif has_changes and has_new_dates:
+            log_to_buffer("📤 Надсилаю повідомлення про зміни + фото")
+            changes_msg = build_changes_notification(
+                diff, URL, SUBSCRIBE, date_content or ""
+            )
+            if changes_msg:
+                ok1 = send_notification_safe(changes_msg, img_path)
                 if ok1:
-                    logtobuffer('✅ changes sent')
+                    log_to_buffer("✅ Повідомлення про зміни відправлено")
                 else:
-                    logtobuffer('❌ changes failed')
+                    log_to_buffer("❌ Помилка надсилання повідомлення про зміни")
             
-            logtobuffer('newdates msg')
-            newmsg = buildnewschedulenotification(diff, normbyqueue, URL, SUBSCRIBE, datecontent or '')
-            if newmsg:
-                ok2 = sendnotificationsafe(newmsg, None)
+            log_to_buffer("📤 Надсилаю повідомлення про новий графік (без фото)")
+            new_msg = build_new_schedule_notification(
+                diff, norm_by_queue, URL, SUBSCRIBE, date_content or ""
+            )
+            if new_msg:
+                ok2 = send_notification_safe(new_msg, None)  # БЕЗ фото
                 if ok2:
-                    logtobuffer('✅ newdates sent')
+                    log_to_buffer("✅ Повідомлення про новий графік відправлено")
                 else:
-                    logtobuffer('❌ newdates failed')
-            else:
-                logtobuffer('no newmsg')
-        
-        savestate(currentmainhashes, currentspanhashes, timestamp)
-        logtobuffer('data→lasthash.json')
-        
+                    log_to_buffer("❌ Помилка надсилання повідомлення про новий графік")
+
+        # 10. Оновити тільки хеші
+        save_state(current_main_hashes, current_span_hashes, timestamp)
+        log_to_buffer("💾 Хеші оновлено в data/last_hash.json")
+
     except Exception as e:
-        logtobuffer(f'❌ {e}')
+        log_to_buffer(f"❌ Критична помилка: {e}")
     finally:
-        sendlogtochannel(logtobuffer())
+        send_log_to_channel()
+        log_to_buffer("🏁 Завершення роботи скрипта")
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
